@@ -15,6 +15,7 @@ IA3 — jeden punkt wejscia z terminala.
     python3 ia3.py predict                 policz predykcje, zapisz i wyslij
     python3 ia3.py score                   skutecznosc dotychczasowych predykcji
     python3 ia3.py calibrate               zmierz realny prog istotnosci
+    python3 ia3.py pulse                   wyslij stan silnika do Firestore
 """
 import argparse
 import sqlite3
@@ -104,6 +105,20 @@ def cmd_score(args):
 def cmd_calibrate(args):
     import calibrate
     calibrate.run(args.runs, args.sample)
+
+
+def cmd_pulse(args):
+    import sqlite3
+    import heartbeat
+    conn = sqlite3.connect(STRATEGY_DB)
+    state = heartbeat.collect(conn)
+    conn.close()
+    print(f"Hipotez: {state['hypotheses_total']:,} | kandydatow: {state['candidates']:,} | "
+          f"prog |t| > {state['threshold']} | ponad progiem: {state['above_threshold']:,}")
+    if not args.local:
+        heartbeat.push(state)
+        n = heartbeat.push_exit_rules()
+        print(f"Puls wyslany. Regul wyjscia w chmurze: {n}")
 
 
 def cmd_report(args):
@@ -236,6 +251,9 @@ def main():
 
     sub.add_parser("score", help="skutecznosc dotychczasowych predykcji")
 
+    p = sub.add_parser("pulse", help="wyslij stan silnika do Firestore")
+    p.add_argument("--local", action="store_true")
+
     p = sub.add_parser("calibrate", help="zmierz realny prog istotnosci")
     p.add_argument("--runs", type=int, default=20)
     p.add_argument("--sample", type=int, default=6000)
@@ -256,6 +274,7 @@ def main():
      "validate": cmd_validate, "diag": cmd_diag, "push": cmd_push,
      "report": cmd_report, "run": cmd_run, "snapshot": cmd_snapshot,
      "predict": cmd_predict, "score": cmd_score, "calibrate": cmd_calibrate,
+     "pulse": cmd_pulse,
      "forever": cmd_forever}[args.command](args)
 
 

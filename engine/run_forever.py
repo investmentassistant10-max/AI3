@@ -56,7 +56,12 @@ SYNC_EVERY_CYCLES = 12      # co ile cykli sprawdzamy nowe dane
 # etapow, wiec licznik cykli dawal nieprzewidywalna czestotliwosc zapisow.
 # Kazdy push to ~100 zapisow dokumentow — przy dlugim biegu warto, zeby
 # zdarzal sie rzadko i regularnie.
-PUSH_INTERVAL_SECONDS = 15 * 60
+# Puls to jeden maly dokument — moze chodzic czesto.
+HEARTBEAT_INTERVAL_SECONDS = 15 * 60
+# Strategie to sto dokumentow na raz. Co kwadrans dawaloby 9600 zapisow
+# dziennie przy darmowym limicie 20 000 — polowa budzetu na dane, ktore
+# zmieniaja sie o kilka pozycji na godzine.
+STRATEGIES_INTERVAL_SECONDS = 60 * 60
 REVALIDATE_EVERY_CYCLES = 6 # co ile cykli przeliczamy stare kandydaty
 REVALIDATE_TOP = 800        # ilu najlepszych przeliczamy
 
@@ -311,6 +316,8 @@ def main():
     import fastcore
 
     stopper = Stopper()
+    started = datetime.now(timezone.utc)
+    started_iso = started.isoformat()
     t_start = time.time()
     deadline = t_start + args.max_hours * 3600 if args.max_hours else None
 
@@ -340,13 +347,15 @@ def main():
         log("Brak kalibracji — prog liczony zachowawczo. Uruchom: python3 ia3.py calibrate")
     log(f"Prog istotnosci na start: |t| > {s['threshold']:.2f}")
     if not args.no_push:
-        log(f"Wysylka do Firestore co {PUSH_INTERVAL_SECONDS // 60} min")
+        log(f"Puls co {HEARTBEAT_INTERVAL_SECONDS // 60} min, "
+            f"strategie co {STRATEGIES_INTERVAL_SECONDS // 60} min")
 
     cycle = 0
     systematic_done = False
     parents_pool = PARENTS_POOL
-    # pierwszy push zaraz po starcie, kolejne co PUSH_INTERVAL_SECONDS
-    last_push = time.time() - PUSH_INTERVAL_SECONDS
+    # pierwsza wysylka zaraz po starcie
+    last_heartbeat = time.time() - HEARTBEAT_INTERVAL_SECONDS
+    last_strategies = time.time() - STRATEGIES_INTERVAL_SECONDS
 
     while not stopper.stop:
         if deadline and time.time() > deadline:
@@ -413,13 +422,28 @@ def main():
             except Exception as e:
                 log(f"  blad: {e}")
 
-        # --- 5. wypchniecie ---
-        if not args.no_push and time.time() - last_push >= PUSH_INTERVAL_SECONDS:
-            last_push = time.time()
+        # --- 5a. puls: jeden maly dokument, czesto ---
+        if not args.no_push and time.time() - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
+            last_heartbeat = time.time()
+            try:
+                import heartbeat
+                state = heartbeat.collect(conn, phase="praca", cycle=cycle,
+                                          started_at=started_iso)
+                heartbeat.push(state)
+                log(f"  puls wyslany | {state['hypotheses_total']:,} hipotez | "
+                    f"{state['candidates']:,} kandydatow")
+            except Exception as e:
+                log(f"  puls nieudany ({e}) — praca idzie dalej")
+
+        # --- 5b. pelna wysylka: strategie, migawka, predykcja ---
+        if not args.no_push and time.time() - last_strategies >= STRATEGIES_INTERVAL_SECONDS:
+            last_strategies = time.time()
             log("faza: wysylka do Firestore")
             try:
                 import push_strategies
                 push_strategies.push(100)
+                import heartbeat
+                n_exits = heartbeat.push_exit_rules()
                 import daily_snapshot
                 daily_snapshot.push(daily_snapshot.build_snapshot())
                 import predict
@@ -427,7 +451,7 @@ def main():
                 pred = predict.make_prediction(quiet=True)
                 if pred:
                     predict.push(pred)
-                log("  migawka i predykcja wyslane")
+                log(f"  strategie, {n_exits} regul wyjscia, migawka i predykcja wyslane")
             except Exception as e:
                 log(f"  nie udalo sie wyslac ({e}) — wyniki zostaja lokalnie")
 
@@ -457,6 +481,15 @@ def main():
     log(f"Lacznie w bazie: {s['total']:,} hipotez | kandydatow: {s['candidates']:,}")
     log(f"Prog istotnosci: |t| > {s['threshold']:.2f} | ponad progiem: {s['above_threshold']}")
     log(f"Najwyzsze |t|: {s['max_t']:.2f} | najlepszy rating: {s['best_rating']:.1f}")
+    if not args.no_push:
+        try:
+            import heartbeat
+            state = heartbeat.collect(conn, phase="zatrzymany", cycle=cycle,
+                                      started_at=started_iso)
+            heartbeat.push(state, keep_history=False)
+            log("Puls koncowy wyslany — arkusz wie, ze silnik stanal.")
+        except Exception:
+            pass
     log("Podsumowanie: python3 ia3.py report")
     conn.close()
 

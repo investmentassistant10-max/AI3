@@ -37,6 +37,17 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // historia przebiegow silnika i reguly wyjscia
+    match /engine_runs/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /exit_rules/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // metadane silnika
     match /engine_meta/{document=**} {
       allow read: if true;

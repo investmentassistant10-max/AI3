@@ -198,3 +198,26 @@ trwa, w Labor Day.
 "co 15 minut". Cykle maja rozna dlugosc zaleznie od tego, ile hipotez przejdzie
 do kosztownych etapow, wiec licznik cykli dawal nieprzewidywalna liczbe zapisow
 przy dlugim biegu.
+
+## Co jest w chmurze, a co zostaje na dysku
+
+| dane | Firestore | dysk |
+|---|---|---|
+| ceny dzienne | tak | tak |
+| top 100 strategii | tak | wszystkie 3.1 mln |
+| reguly wyjscia | top 40 | wszystkie |
+| migawka rynku, predykcje | tak | tak |
+| puls silnika, historia przebiegow | tak | log tekstowy |
+| log silnika (5.5 tys. linii) | nie | tak |
+
+Podzial wynika z kosztu zapisu. Kazdy dokument w Firestore to platny zapis,
+a darmowy limit to 20 000 dziennie. Dlatego:
+
+- **puls** (jeden maly dokument) idzie co 15 minut — 96 zapisow dziennie
+- **strategie** (sto dokumentow) ida co godzine — 2400 zapisow dziennie
+
+Wczesniej strategie szly co kwadrans, czyli 9600 zapisow — polowa darmowego
+limitu na dane, ktore zmieniaja sie o kilka pozycji na godzine.
+
+Historia przebiegow (`engine_runs`) jest przycinana do 500 ostatnich punktow,
+zeby kolekcja nie rosla bez konca.

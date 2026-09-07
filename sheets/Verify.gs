@@ -106,21 +106,26 @@ function verifyMorningData() {
  * Uruchom RAZ recznie po wklejeniu kodu.
  */
 function setupAllTriggers() {
-  var wanted = [
+  var daily = [
     { fn: 'dailyUpdate', hour: 8 },
     { fn: 'verifyMorningData', hour: 8, minute: 15 },
     { fn: 'syncPredictionLog', hour: 23 }
   ];
-  var names = wanted.map(function (w) { return w.fn; });
+  var hourly = ['hourlySync'];
+  var names = daily.map(function (w) { return w.fn; }).concat(hourly);
 
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (names.indexOf(t.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(t);
   });
 
-  wanted.forEach(function (w) {
+  daily.forEach(function (w) {
     var b = ScriptApp.newTrigger(w.fn).timeBased().everyDays(1).atHour(w.hour);
     if (w.minute !== undefined) b = b.nearMinute(w.minute);
     b.create();
+  });
+
+  hourly.forEach(function (fn) {
+    ScriptApp.newTrigger(fn).timeBased().everyHours(1).create();
   });
 
   Logger.log('Ustawione triggery: ' + names.join(', ') +

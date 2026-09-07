@@ -13,6 +13,7 @@ wersjonowany; do Apps Script wklejasz go recznie.
 | `Verify.gs` | poranna kontrola: czy swieca dotarla; ustawianie triggerow |
 | `Log.gs` | arkusz **Log** — jeden wiersz na dzien |
 | `PredictionLog.gs` | arkusz **Predykcje** — co system twierdzil i co z tego wyszlo |
+| `Engine.gs` | arkusze **Silnik**, **Strategie**, **Wyjścia** — odczyt co godzine |
 
 ## Podzial pracy miedzy chmura a Makiem
 
@@ -38,6 +39,7 @@ duplikaty:
 | 8:00 | `dailyUpdate` | dociaga wczorajsza swiece do Firestore |
 | 8:15 | `verifyMorningData` | sprawdza, czy dotarla; zapisuje status do arkusza Log |
 | 23:00 | `syncPredictionLog` | zapisuje predykcje dnia i rozlicza zalegle |
+| co godzine | `hourlySync` | stan silnika, ranking strategii, reguly wyjscia |
 
 Strefa czasowa projektu (Project Settings -> Time zone) musi byc ustawiona
 na `Europe/Warsaw`, bo od niej zaleza godziny triggerow.
@@ -56,3 +58,22 @@ na `Europe/Warsaw`, bo od niej zaleza godziny triggerow.
 - `testCalendar()` — pokazuje swieta NYSE w tym roku i status dzisiejszego dnia
 - `backfillHistory()` — jednorazowy import historii od 2000 roku
 - `predictionScore()` — skutecznosc predykcji, wynik w logach
+
+## Arkusze, ktore powstaja same
+
+| arkusz | co zawiera | odswiezany |
+|---|---|---|
+| **Log** | jeden wiersz na dzien: sesja, swiece, predykcja | 8:15 i 23:00 |
+| **Predykcje** | co system twierdzil i co z tego wyszlo | 23:00 |
+| **Silnik** | jeden wiersz na odczyt: ile hipotez, przyrost, prog, stan | co godzine |
+| **Strategie** | top 100 z ratingiem, przewaga, trafnosc, warunki | co godzine |
+| **Wyjscia** | najlepsze kombinacje wejscie + SL/TP/czas | co godzine |
+
+Arkusz **Silnik** ma kolumne "Przyrost" — ile hipotez przybylo od poprzedniego
+odczytu. Zero przez kilka godzin znaczy, ze silnik stoi. Kolumna "Stan"
+rozroznia trzy sytuacje: `pracuje` (puls swiezy), `bez zmian` (ten sam puls
+co poprzednio) i `zatrzymany` (silnik wyslal puls pozegnalny przy wyjsciu).
+
+Arkusz **Wyjscia** jest najbardziej praktyczny ze wszystkich: mowi nie tylko
+KIEDY wejsc, ale tez jak dlugo trzymac i gdzie postawic stop. Do niedawna te
+dane w ogole nie opuszczaly Maca.
