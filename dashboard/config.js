@@ -11,12 +11,12 @@
 
 window.IA3_CONFIG = {
   firebase: {
-    apiKey: "WKLEJ_TUTAJ",
-    authDomain: "ai-3-d55c1.firebaseapp.com",
-    projectId: "ai-3-d55c1",
-    storageBucket: "ai-3-d55c1.firebasestorage.app",
-    messagingSenderId: "WKLEJ_TUTAJ",
-    appId: "WKLEJ_TUTAJ"
+  apiKey: "AIzaSyCVWMIpL_BOI1WBbzbE0bNTWyMV2KBAuQA",
+  authDomain: "ai-3-d55c1.firebaseapp.com",
+  projectId: "ai-3-d55c1",
+  storageBucket: "ai-3-d55c1.firebasestorage.app",
+  messagingSenderId: "899965672530",
+  appId: "1:899965672530:web:76ab8ee0e82c43fef4938b"
   },
 
   // Ile najlepszych strategii pobierac do oceny

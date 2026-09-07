@@ -7,6 +7,11 @@ venv/
 # Local data & secrets — nigdy nie trafiają do repo
 data/*.db
 data/*.sqlite
+data/*.sqlite-journal
+data/*.sqlite-wal
+data/*.sqlite-shm
+data/*.json
+data/*.log
 data/*.csv
 firebase/*serviceAccountKey*.json
 firebase/*.json

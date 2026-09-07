@@ -20,6 +20,12 @@ import json
 ROOT = Path(__file__).resolve().parent.parent
 STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
 
+# Skarbiec zuzywa sie od patrzenia. Kazda strategia przepuszczona przez
+# ostatnie dwa lata to kolejna proba na tych samych 502 sesjach — po
+# kilkuset takich probach "potwierdzenie" nie znaczy juz nic, bo cos musialo
+# przejsc przypadkiem. Limit jest twardy i celowo niski.
+TREASURY_BUDGET = 100
+
 EXTRA_SCHEMA = """
 ALTER TABLE strategies ADD COLUMN treasury_n_signals INTEGER;
 ALTER TABLE strategies ADD COLUMN treasury_edge_mean REAL;
@@ -67,8 +73,22 @@ def validate_top(n=10):
     ensure_columns(conn)
 
     used = treasury_budget_used(conn)
+    remaining = TREASURY_BUDGET - used
     print(f"Skarbiec: {treasury_df.index.min().date()} -> {treasury_df.index.max().date()} ({len(treasury_df)} dni)")
-    print(f"Budzet skarbca zuzyty do tej pory: {used} odpytan\n")
+    print(f"Budzet: zuzyte {used} z {TREASURY_BUDGET}, zostalo {remaining}\n")
+
+    if remaining <= 0:
+        print("BUDZET SKARBCA WYCZERPANY.")
+        print("Kazde kolejne sprawdzenie osłabia wartosc wszystkich poprzednich —")
+        print("po tylu probach na tych samych 502 sesjach 'potwierdzenie' przestaje")
+        print("cokolwiek znaczyc. Poczekaj na nowe dane albo zwieksz TREASURY_BUDGET")
+        print("swiadomie, wiedzac, co tracisz.")
+        conn.close()
+        return
+
+    if n > remaining:
+        print(f"Zadales {n} strategii, a w budzecie zostalo {remaining}. Sprawdzam {remaining}.")
+        n = remaining
 
     rows = conn.execute(
         """SELECT * FROM strategies WHERE status='candidate'

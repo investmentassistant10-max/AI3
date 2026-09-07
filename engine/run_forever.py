@@ -46,9 +46,13 @@ LOG_PATH = ROOT / "data" / "engine.log"
 EXPLORE_BATCH = 40_000      # ile losowych hipotez na jedna runde eksploracji
 EVOLVE_BATCH = 40_000       # ile mutacji na jedna runde ewolucji
 PARENTS_POOL = 120          # z ilu najlepszych bierzemy rodzicow
+PLACEBO_RUNS = 40           # ile przesuniec w tescie placebo
+PLACEBO_MAX_P = 0.05        # powyzej tego kandydat jest odrzucany
 EXITS_EVERY_CYCLES = 3      # co ile cykli dobieramy reguly wyjscia
 PUSH_EVERY_CYCLES = 3       # co ile cykli wypychamy do Firestore
 SYNC_EVERY_CYCLES = 12      # co ile cykli sprawdzamy nowe dane
+REVALIDATE_EVERY_CYCLES = 6 # co ile cykli przeliczamy stare kandydaty
+REVALIDATE_TOP = 800        # ilu najlepszych przeliczamy
 
 
 class Stopper:
@@ -118,7 +122,7 @@ def evaluate_batch(strategies, data, masks, conn, seen, n_prior, quiet=True):
     import fastcore
     from strategy import describe
     from rating import compute_rating
-    from search import save_batch, CANDIDATE_THRESHOLD
+    from search import save_batch, CANDIDATE_THRESHOLD, total_trials
 
     rows, n_tested, n_kept = [], 0, 0
     now = datetime.now(timezone.utc).isoformat()
@@ -150,6 +154,7 @@ def evaluate_batch(strategies, data, masks, conn, seen, n_prior, quiet=True):
 
         if stats.get("status") != "ok":
             row.update({
+                "placebo_p": None,
                 "n_signals": None, "n_episodes": stats.get("n_episodes"),
                 "frequency_pct": stats.get("frequency_pct"),
                 "mean": None, "base_mean": None, "edge_mean": None,
@@ -165,9 +170,20 @@ def evaluate_batch(strategies, data, masks, conn, seen, n_prior, quiet=True):
             base = (scores["accuracy_score"] * 0.45 + stab * 0.35
                     + scores["frequency_score"] * 0.20)
             rating = round(base * scores["significance_multiplier"], 1)
+
+            # Placebo tylko dla tych, ktore i tak zostalyby kandydatami —
+            # 40 dodatkowych ewaluacji na hipoteze bylo za drogie dla
+            # wszystkich, a odrzucone i tak nas nie interesuja.
+            pl_p = None
+            if rating >= CANDIDATE_THRESHOLD:
+                pl_p = fastcore.placebo_p(data, mask, strat["horizon"],
+                                          stats["t_stat"], n=PLACEBO_RUNS)
+                if pl_p is not None and pl_p > PLACEBO_MAX_P:
+                    rating = round(rating * 0.3, 1)   # przezyl przesuniecie = podejrzany
             if rating >= CANDIDATE_THRESHOLD:
                 n_kept += 1
             row.update({
+                "placebo_p": pl_p,
                 "n_signals": stats["n_signals"], "n_episodes": stats["n_episodes"],
                 "frequency_pct": stats["frequency_pct"], "mean": stats["mean"],
                 "base_mean": stats["base_mean"], "edge_mean": stats["edge_mean"],
@@ -189,6 +205,81 @@ def evaluate_batch(strategies, data, masks, conn, seen, n_prior, quiet=True):
 
     save_batch(conn, rows)
     return n_tested, n_kept
+
+
+def revalidate(conn, data, masks, top=REVALIDATE_TOP):
+    """
+    Przelicza dawniej ocenione strategie na aktualnym stanie danych i wiedzy.
+
+    Dwa powody, dla ktorych wynik moze sie zmienic bez zadnego bledu:
+      * doszly nowe sesje, wiec zmienila sie proba
+      * sprawdzilismy tymczasem setki tysiecy innych hipotez, wiec prog
+        istotnosci poszedl w gore i to, co bylo kandydatem, moze nim nie byc
+
+    Strategie, ktore spadly ponizej progu, dostaja status 'stale' — nie sa
+    kasowane, bo informacja o tym, ze cos przestalo dzialac, tez jest wiedza.
+    """
+    import fastcore
+    from rating import compute_rating
+
+    rows = conn.execute(
+        """SELECT id, definition, horizon FROM strategies
+           WHERE status IN ('candidate','stale') ORDER BY rating DESC LIMIT ?""",
+        (top,),
+    ).fetchall()
+    if not rows:
+        return 0, 0
+
+    n_trials = total_trials(conn)
+    now = datetime.now(timezone.utc).isoformat()
+    demoted = 0
+    restored = 0
+
+    for sid, definition, horizon in rows:
+        strat = json.loads(definition)
+        mask = None
+        for cond in strat["conditions"]:
+            key = tuple(cond)
+            m = masks.get(key)
+            if m is None:
+                m = fastcore.condition_mask(data, *key)
+                masks[key] = m
+            mask = m if mask is None else (mask & m)
+
+        stats = fastcore.evaluate(data, mask, horizon)
+        if stats.get("status") != "ok":
+            conn.execute("UPDATE strategies SET status='stale', tested_at=? WHERE id=?",
+                         (now, sid))
+            demoted += 1
+            continue
+
+        stab, _ = fastcore.stability(data, mask, horizon, stats["edge_mean"])
+        scores = compute_rating(stats, None, n_trials)
+        base = (scores["accuracy_score"] * 0.45 + stab * 0.35
+                + scores["frequency_score"] * 0.20)
+        rating = round(base * scores["significance_multiplier"], 1)
+
+        old = conn.execute("SELECT status FROM strategies WHERE id=?", (sid,)).fetchone()[0]
+        new_status = "candidate" if rating >= CANDIDATE_THRESHOLD else "stale"
+        if old == "candidate" and new_status == "stale":
+            demoted += 1
+        elif old == "stale" and new_status == "candidate":
+            restored += 1
+
+        conn.execute(
+            """UPDATE strategies SET rating=?, status=?, t_stat=?, edge_mean=?,
+               mean=?, base_mean=?, hit_rate=?, base_hit_rate=?, edge_hit=?,
+               n_signals=?, n_episodes=?, frequency_pct=?, stability_score=?,
+               significance_multiplier=?, tested_at=? WHERE id=?""",
+            (rating, new_status, stats["t_stat"], stats["edge_mean"], stats["mean"],
+             stats["base_mean"], stats["hit_rate"], stats["base_hit_rate"],
+             stats["edge_hit"], stats["n_signals"], stats["n_episodes"],
+             stats["frequency_pct"], stab, scores["significance_multiplier"],
+             now, sid),
+        )
+
+    conn.commit()
+    return demoted, restored
 
 
 def main():
@@ -228,6 +319,12 @@ def main():
         log(f"UWAGI DO DANYCH: {problems}")
 
     conn = get_db()
+    for col, typ in (("placebo_p", "REAL"), ("n_conditions", "INTEGER")):
+        try:
+            conn.execute(f"ALTER TABLE strategies ADD COLUMN {col} {typ}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     seen = {r[0] for r in conn.execute("SELECT id FROM strategies")}
     log(f"W bazie juz: {len(seen):,} sprawdzonych hipotez")
     s = db_stats(conn)
@@ -280,6 +377,16 @@ def main():
             except Exception as e:
                 log(f"  blad: {e}")
 
+        # --- 4b. re-walidacja dawnych znalezisk ---
+        if cycle % REVALIDATE_EVERY_CYCLES == 0:
+            log("faza: przeliczanie dawnych kandydatow")
+            try:
+                dem, res = revalidate(conn, data, masks)
+                log(f"  zdegradowanych {dem}, przywroconych {res} "
+                    f"(prog rosnie wraz z liczba prob)")
+            except Exception as e:
+                log(f"  blad: {e}")
+
         # --- 5. wypchniecie ---
         if not args.no_push and cycle % PUSH_EVERY_CYCLES == 0:
             log("faza: wysylka do Firestore")
@@ -288,7 +395,12 @@ def main():
                 push_strategies.push(100)
                 import daily_snapshot
                 daily_snapshot.push(daily_snapshot.build_snapshot())
-                log("  migawka na dzis wyslana")
+                import predict
+                predict.settle(quiet=True)
+                pred = predict.make_prediction(quiet=True)
+                if pred:
+                    predict.push(pred)
+                log("  migawka i predykcja wyslane")
             except Exception as e:
                 log(f"  nie udalo sie wyslac ({e}) — wyniki zostaja lokalnie")
 

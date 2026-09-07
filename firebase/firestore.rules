@@ -31,6 +31,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // predykcje i ich skutecznosc
+    match /predictions/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // metadane silnika
     match /engine_meta/{document=**} {
       allow read: if true;

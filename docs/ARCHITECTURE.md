@@ -86,3 +86,59 @@ a nie tylko srednio po calosci.
 
 Wniosek praktyczny: predykcja powinna byc wazona rezimem zmiennosci.
 W spokojnym rynku system powinien deklarowac nizsza pewnosc.
+
+## Zabezpieczenia metodologiczne (stan po audycie)
+
+Silnik ma cztery niezalezne mechanizmy chroniace przed braniem szumu za
+odkrycie. Zadnego z nich nie da sie pominac bez swiadomej decyzji.
+
+**1. Prog istotnosci rosnacy z liczba prob**
+Liczony ze WSZYSTKICH prob — warunkow wejscia i regul wyjscia razem
+(`search.total_trials`). Przy 50 tys. hipotez wynosi |t| > 4.6, przy
+milionie 5.3.
+
+**2. Kalibracja empiryczna progu** (`calibrate.py`)
+Teoretyczny wzor zaklada niezalezne testy, a nasze sa skorelowane. Zamiast
+zgadywac, mierzymy: przesuwamy cyklicznie zwroty w przod (co niszczy kazdy
+prawdziwy zwiazek, zostawiajac te sama strukture danych) i patrzymy, jak
+wysoko siega najlepszy wynik na czystym szumie. To jest prawdziwy prog.
+
+**3. Test placebo jako bramka** (`fastcore.placebo_p`)
+Kazdy kandydat przechodzi 40 przesuniec cyklicznych maski sygnalu.
+Przesuniecie zachowuje strukture skupisk sygnalu — jest ostrzejsze niz pelne
+przetasowanie, ktore te skupiska rozbija i przez to zanizyloby poprzeczke.
+Kandydat, ktorego przewaga przezywa przesuniecie w wiecej niz 5% prob,
+dostaje rating obniżony do 30% wartosci.
+
+**4. Budzet skarbca** (`validate.TREASURY_BUDGET`)
+Twardy limit 100 odpytan. Skarbiec to 502 sesje — po kilkuset probach na tych
+samych danych "potwierdzenie" przestaje cokolwiek znaczyc, bo cos musialo
+przejsc przypadkiem. Po wyczerpaniu budzetu walidacja odmawia dzialania.
+
+**Re-walidacja** (`run_forever.revalidate`)
+Co szesc cykli 800 najlepszych strategii jest przeliczanych na aktualnych
+danych i aktualnym progu. Strategia moze stracic status kandydata bez zadnego
+bledu — bo doszly nowe sesje albo bo sprawdzilismy tymczasem setki tysiecy
+innych hipotez i poprzeczka poszla w gore. Zdegradowane dostaja status
+`stale` i nie sa kasowane: informacja, ze cos przestalo dzialac, tez jest
+wiedza.
+
+## Log predykcji
+
+`predict.py` zapisuje kazda predykcje do tabeli `predictions` i rozlicza ja,
+gdy pojawia sie dane. Rozliczenie liczone jest na dwa sposoby:
+- **close-to-close** — porownywalny z tym, co mierzyl silnik
+- **open-to-close** — wykonalny naprawde (wejscie na otwarciu nastepnej sesji)
+
+Roznica miedzy nimi to cena za to, ze sygnal znamy dopiero po zamknieciu.
+
+To jedyny test przeprowadzany na danych, ktorych system nie widzial w chwili
+stawiania tezy. Wszystko inne — rating, skarbiec, placebo — mierzy przeszlosc.
+
+## Czego swiadomie NIE robimy
+
+**Kosztow transakcyjnych nie uwzgledniamy** (decyzja z 2026-09-07). Wszystkie
+przewagi sa liczone brutto. Przy przewadze rzedu 0.17% na horyzoncie 1D
+realny koszt round-trip zjadlby 20-45% wyniku, przy 0.38% na 10D — 10-20%.
+Oznacza to, ze ranking moze faworyzowac strategie krotkoterminowe bardziej,
+niz uzasadnialaby to praktyka.

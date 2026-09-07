@@ -167,3 +167,41 @@ def stability(data, mask, horizon, overall_edge):
     ratio = same_sign / usable
     coverage = usable / len(data.period_slices)
     return round(ratio * coverage * 100.0, 1), details
+
+
+def placebo_p(data, mask, horizon, t_real, n=40, rng=None):
+    """
+    Test placebo przez przesuniecie cykliczne maski.
+
+    Przesuwamy sygnal w czasie o losowa liczbe sesji. Struktura sygnalu —
+    to, ze wystepuje seriami — zostaje zachowana, znika tylko jego zwiazek
+    z tym, co dzialo sie potem. Jesli "przewaga" przezywa takie przesuniecie,
+    nie pochodzi z rynku, tylko z konstrukcji testu.
+
+    Przesuniecie jest tu lepsze niz pelne przetasowanie: przetasowanie
+    rozbija skupiska sygnalu i przez to zanizyloby poprzeczke.
+
+    Zwraca frakcje przesuniec, ktore wypadly rownie dobrze jak prawdziwe
+    dane. Wartosc bliska zeru = efekt jest prawdziwy.
+    """
+    if t_real is None or not np.isfinite(t_real):
+        return None
+    if rng is None:
+        rng = np.random.default_rng(12345)
+
+    lo, hi = horizon + 5, data.n - horizon - 5
+    if hi <= lo:
+        return None
+
+    as_good = 0
+    counted = 0
+    for _ in range(n):
+        shifted = np.roll(mask, int(rng.integers(lo, hi)))
+        r = evaluate(data, shifted, horizon)
+        if r.get("status") == "ok" and r["t_stat"] is not None:
+            counted += 1
+            if abs(r["t_stat"]) >= abs(t_real):
+                as_good += 1
+    if counted < n // 3:
+        return None
+    return round(as_good / counted, 4)

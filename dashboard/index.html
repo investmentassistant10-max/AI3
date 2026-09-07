@@ -109,13 +109,14 @@
     <h2>Predykcja według horyzontu</h2>
     <div class="scroll"><table id="horizonTable">
       <thead><tr>
-        <th>horyzont</th><th>kierunek</th><th>oczekiwany ruch</th>
+        <th>horyzont</th><th>kierunek</th><th>prognoza ruchu</th><th>w tym przewaga</th>
         <th>poziom docelowy</th><th>strategii</th><th>long / short</th><th>zgodność</th>
       </tr></thead>
-      <tbody><tr><td colspan="7" class="note">wczytuję…</td></tr></tbody>
+      <tbody><tr><td colspan="8" class="note">wczytuję…</td></tr></tbody>
     </table></div>
     <div class="note" style="margin-top:9px">
-      Każdy horyzont liczony osobno — strategia mierząca skutek po 10 dniach nie jest
+      <b>Prognoza ruchu</b> to oczekiwana zmiana ceny; <b>przewaga</b> to jej część,
+      która pochodzi z sygnału, a nie ze zwykłego dryfu rynku. Każdy horyzont liczony osobno — strategia mierząca skutek po 10 dniach nie jest
       porównywalna z jednodniową i nie wolno ich uśredniać w jedną liczbę.
     </div>
   </div>
@@ -155,6 +156,11 @@
       <h2>Wnioski</h2>
       <div id="conclusion" class="note" style="font-size:13px;color:var(--text)">—</div>
     </div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <h2>Skuteczność dotychczasowych predykcji</h2>
+    <div id="scoreboard" class="note">wczytuję…</div>
   </div>
 
   <div class="card">
@@ -295,6 +301,20 @@ async function main() {
 
   $("dataStamp").textContent = `ostatnia sesja ${snap.date} · zamknięcie ${fmt(snap.last_close)}`;
 
+  // Gotowa predykcja policzona przez silnik. Panel jej nie przelicza —
+  // ta sama logika w dwoch jezykach predzej czy pozniej by sie rozjechala,
+  // a przy okazji nie bylo zapisu tego, co system twierdzil danego dnia.
+  const predDoc = await getDoc(doc(db, "predictions", "latest"));
+  const ready = predDoc.exists() && predDoc.data().date === snap.date
+    ? predDoc.data() : null;
+  if (predDoc.exists() && !ready) {
+    alertBox(`Predykcja w bazie jest z <b>${predDoc.data().date}</b>, a dane z <b>${snap.date}</b>. `
+      + `Uruchom <code>python3 ia3.py predict</code>, żeby ją odświeżyć — poniżej liczę doraźnie.`);
+  } else if (!predDoc.exists()) {
+    alertBox(`Brak zapisanej predykcji — liczę doraźnie w przeglądarce. `
+      + `Uruchom <code>python3 ia3.py predict</code>, żeby zapisywać je do logu i mierzyć skuteczność.`);
+  }
+
   const qs = await getDocs(query(
     collection(db, "strategies"),
     where("rating", ">=", CFG.minRating),
@@ -335,7 +355,16 @@ async function main() {
   const byHorizon = {};
   HORIZONS.forEach(h => {
     const set = matched.filter(s => s.horizon === h);
-    if (set.length) byHorizon[h] = predictFor(set);
+    if (!set.length) return;
+    const local = predictFor(set);
+    const server = ready?.horizons?.[String(h)];
+    // Gotowa predykcja z silnika ma wlasciwa liczbe: `expected_move` to
+    // prognoza ruchu ceny (sredni zwrot po sygnale), a nie sama przewaga
+    // nad baseline, ktora panel liczyl wczesniej.
+    byHorizon[h] = server
+      ? { ...local, move: server.expected_move, edge: server.edge_mean,
+          confidence: server.confidence, fromEngine: true }
+      : { ...local, edge: local.move, fromEngine: false };
   });
 
   // naglowek opisuje NAJBLIZSZA SESJE — czyli wylacznie strategie jednodniowe
@@ -358,7 +387,9 @@ async function main() {
   const countFactor = Math.min((near.set.length || matched.length) / 8, 1);
   const ratingFactor = Math.min(avgRating / 85, 1);
   const volFactor = volp === null || volp === undefined ? 0.7 : 0.55 + 0.45 * volp;
-  const confidence = Math.round(agreement * countFactor * ratingFactor * volFactor * 100);
+  const confidence = byHorizon[1]?.confidence !== undefined
+    ? Math.round(byHorizon[1].confidence)
+    : Math.round(agreement * countFactor * ratingFactor * volFactor * 100);
 
   // --- naglowek predykcji ---
   const noNear = near.set.length === 0;
@@ -396,7 +427,7 @@ async function main() {
   const htb = $("horizonTable").querySelector("tbody");
   const hRows = HORIZONS.filter(h => byHorizon[h]);
   if (!hRows.length) {
-    htb.innerHTML = `<tr><td colspan="7" class="note">Brak strategii z zastosowaniem dziś.</td></tr>`;
+    htb.innerHTML = `<tr><td colspan="8" class="note">Brak strategii z zastosowaniem dziś.</td></tr>`;
   } else {
     htb.innerHTML = hRows.map(h => {
       const p = byHorizon[h];
@@ -408,6 +439,7 @@ async function main() {
         <td><b>${h}D</b></td>
         <td class="${cls}">${label}</td>
         <td class="${cls}">${pct(p.move)}</td>
+        <td class="note">${pct(p.edge ?? p.move)}</td>
         <td>${fmt(target)}</td>
         <td>${p.set.length}</td>
         <td><span class="pill long">${p.longs}</span> <span class="pill short">${p.shorts}</span></td>
@@ -479,6 +511,32 @@ async function main() {
         <td class="desc">${conds}</td>
       </tr>`;
     }).join("");
+  }
+
+  // --- skutecznosc dotychczasowych predykcji ---
+  const sbDoc = await getDoc(doc(db, "predictions", "scoreboard"));
+  const sb = sbDoc.exists() ? sbDoc.data() : null;
+  if (!sb || !sb.n_settled) {
+    $("scoreboard").innerHTML =
+      "Brak rozliczonych predykcji. To normalne na początku — pierwsze wyniki pojawią się "
+      + "po kilku sesjach, a sensowne wnioski dopiero po jakichś stu. "
+      + "<b>To jedyny naprawdę uczciwy test tego systemu</b>: wszystko inne mierzone jest "
+      + "na danych, które silnik już widział.";
+  } else {
+    const rows = Object.entries(sb.by_horizon || {}).map(([h, v]) => `
+      <tr><td><b>${h}D</b></td><td>${v.n}</td>
+      <td>${v.accuracy !== null ? v.accuracy.toFixed(1) + "%" : "—"}</td>
+      <td>${pct(v.predicted_mean)}</td><td>${pct(v.actual_mean)}</td>
+      <td>${fmt(v.mean_abs_error, 3)} pp</td></tr>`).join("");
+    $("scoreboard").innerHTML = `
+      <div class="scroll"><table>
+        <thead><tr><th>horyzont</th><th>predykcji</th><th>trafność kierunku</th>
+        <th>prognozowano</th><th>faktycznie</th><th>błąd</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div style="margin-top:9px">Łącznie ${sb.n_settled} rozliczonych predykcji, trafność kierunku
+      <b>${sb.overall_accuracy !== null ? sb.overall_accuracy.toFixed(1) + "%" : "—"}</b>.
+      ${sb.n_settled < 100 ? "Przy tej liczbie wynik jest jeszcze bardzo niestabilny." : ""}</div>`;
   }
 
   // --- stopka ---

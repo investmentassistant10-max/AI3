@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS strategies (
     significance_multiplier REAL,
     rating          REAL,
     status          TEXT,
+    placebo_p       REAL,
     tested_at       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_rating ON strategies(rating DESC);
@@ -77,6 +78,20 @@ CREATE TABLE IF NOT EXISTS search_runs (
 CANDIDATE_THRESHOLD = 40.0
 
 
+def total_trials(conn):
+    """
+    Wszystkie proby, jakie system wykonal — nie tylko warunki wejscia.
+    Kazda przetestowana regula wyjscia to tez los na loterii i tez podnosi
+    poprzeczke dla wszystkiego pozostalego.
+    """
+    n = conn.execute("SELECT COUNT(*) FROM strategies").fetchone()[0]
+    try:
+        n += conn.execute("SELECT COUNT(*) FROM exit_rules").fetchone()[0]
+    except sqlite3.OperationalError:
+        pass
+    return n
+
+
 def get_db():
     STRATEGY_DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(STRATEGY_DB)
@@ -94,13 +109,13 @@ def save_batch(conn, rows):
             n_signals, n_episodes, frequency_pct,
             mean, base_mean, edge_mean, hit_rate, base_hit_rate, edge_hit,
             t_stat, p_value, accuracy_score, stability_score, frequency_score,
-            significance_multiplier, rating, status, tested_at
+            significance_multiplier, rating, status, placebo_p, tested_at
         ) VALUES (
             :id, :definition, :description, :horizon, :n_conditions,
             :n_signals, :n_episodes, :frequency_pct,
             :mean, :base_mean, :edge_mean, :hit_rate, :base_hit_rate, :edge_hit,
             :t_stat, :p_value, :accuracy_score, :stability_score, :frequency_score,
-            :significance_multiplier, :rating, :status, :tested_at
+            :significance_multiplier, :rating, :status, :placebo_p, :tested_at
         )""",
         rows,
     )
@@ -194,6 +209,7 @@ def run_search(hours=None, minutes=None, level=None, quiet=False):
 
             if stats.get("status") != "ok":
                 row.update({
+                    "placebo_p": None,
                     "n_signals": None, "n_episodes": stats.get("n_episodes"),
                     "frequency_pct": stats.get("frequency_pct"),
                     "mean": None, "base_mean": None, "edge_mean": None,
@@ -223,6 +239,7 @@ def run_search(hours=None, minutes=None, level=None, quiet=False):
                 if is_candidate:
                     n_kept += 1
                 row.update({
+                    "placebo_p": None,
                     "n_signals": stats["n_signals"],
                     "n_episodes": stats["n_episodes"],
                     "frequency_pct": stats["frequency_pct"],

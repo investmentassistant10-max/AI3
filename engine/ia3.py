@@ -12,6 +12,9 @@ IA3 — jeden punkt wejscia z terminala.
     python3 ia3.py run --hours 8           pelny cykl: sync, search, exits, push
     python3 ia3.py forever                 silnik ciagly — uruchom i zostaw
     python3 ia3.py snapshot                migawka na dzis dla dashboardu
+    python3 ia3.py predict                 policz predykcje, zapisz i wyslij
+    python3 ia3.py score                   skutecznosc dotychczasowych predykcji
+    python3 ia3.py calibrate               zmierz realny prog istotnosci
 """
 import argparse
 import sqlite3
@@ -83,6 +86,26 @@ def cmd_snapshot(args):
         print("Wyslano do Firestore.")
 
 
+def cmd_predict(args):
+    import predict
+    predict.settle(quiet=True)
+    pred = predict.make_prediction()
+    if pred and not args.local:
+        predict.push(pred)
+        print("Wyslano do Firestore: predictions/latest")
+
+
+def cmd_score(args):
+    import predict
+    predict.settle(quiet=True)
+    predict.score()
+
+
+def cmd_calibrate(args):
+    import calibrate
+    calibrate.run(args.runs, args.sample)
+
+
 def cmd_report(args):
     if not STRATEGY_DB.exists():
         print("Brak bazy strategii. Uruchom: python3 ia3.py search")
@@ -152,9 +175,14 @@ def cmd_run(args):
     cmd_search(args)
     print("\n>>> 3/4 dobor regul wyjscia")
     cmd_exits(args)
-    print("\n>>> 4/4 wysylka do Firestore")
+    print("\n>>> 4/5 wysylka do Firestore")
     try:
         cmd_push(args)
+    except Exception as e:
+        print(f"    (pominieto: {e})")
+    print("\n>>> 5/5 predykcja")
+    try:
+        cmd_predict(argparse.Namespace(local=False))
     except Exception as e:
         print(f"    (pominieto: {e})")
     print("\nGotowe. Podsumowanie: python3 ia3.py report")
@@ -193,6 +221,15 @@ def main():
     p = sub.add_parser("snapshot", help="migawka na dzis dla dashboardu")
     p.add_argument("--local", action="store_true")
 
+    p = sub.add_parser("predict", help="policz predykcje i wyslij")
+    p.add_argument("--local", action="store_true")
+
+    sub.add_parser("score", help="skutecznosc dotychczasowych predykcji")
+
+    p = sub.add_parser("calibrate", help="zmierz realny prog istotnosci")
+    p.add_argument("--runs", type=int, default=20)
+    p.add_argument("--sample", type=int, default=6000)
+
     p = sub.add_parser("forever", help="silnik ciagly — uruchom i zostaw")
     p.add_argument("--max-hours", type=float)
     p.add_argument("--no-push", action="store_true")
@@ -208,6 +245,7 @@ def main():
     {"sync": cmd_sync, "search": cmd_search, "exits": cmd_exits,
      "validate": cmd_validate, "diag": cmd_diag, "push": cmd_push,
      "report": cmd_report, "run": cmd_run, "snapshot": cmd_snapshot,
+     "predict": cmd_predict, "score": cmd_score, "calibrate": cmd_calibrate,
      "forever": cmd_forever}[args.command](args)
 
 
