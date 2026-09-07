@@ -192,38 +192,72 @@ function alertBox(msg) {
   $("alerts").insertAdjacentHTML("beforeend", `<div class="warn">${msg}</div>`);
 }
 
-// ---------- odliczanie do otwarcia NYSE ----------
-function nextMarketOpen() {
-  const now = new Date();
-  for (let i = 0; i < 8; i++) {
-    const d = new Date(now.getTime() + i * 864e5);
-    const nyParts = new Intl.DateTimeFormat("en-US", {
-      timeZone: CFG.marketOpen.timeZone, weekday: "short",
-      year: "numeric", month: "2-digit", day: "2-digit"
-    }).formatToParts(d);
-    const g = t => nyParts.find(p => p.type === t).value;
-    if (["Sat", "Sun"].includes(g("weekday"))) continue;
-    // szukamy momentu, w ktorym w Nowym Jorku jest 9:30 tego dnia
-    for (let guess = 0; guess < 48; guess++) {
-      const cand = new Date(Date.UTC(+g("year"), +g("month") - 1, +g("day"), 0, 0) + guess * 18e5);
-      const hm = new Intl.DateTimeFormat("en-US", {
-        timeZone: CFG.marketOpen.timeZone, hour: "2-digit", minute: "2-digit", hour12: false
-      }).format(cand);
-      if (hm === "09:30" && cand > now) return cand;
-    }
+// ---------- zegar sesji NYSE ----------
+// Sesja trwa 9:30-16:00 czasu nowojorskiego. Panel musi rozrozniac trzy
+// stany, bo w kazdym co innego jest istotne: ile zostalo do wejscia,
+// ile do zamkniecia, i czy predykcja dotyczy juz trwajacej sesji.
+
+function nyTime(d) {
+  const p = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", weekday: "short", year: "numeric",
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+  }).formatToParts(d);
+  const g = t => p.find(x => x.type === t).value;
+  return { wd: g("weekday"), y: +g("year"), m: +g("month"), d: +g("day"),
+           h: +g("hour") % 24, min: +g("minute") };
+}
+
+/** Moment, w ktorym w Nowym Jorku jest zadana godzina danego dnia. */
+function nyMoment(base, hour, minute) {
+  const t = nyTime(base);
+  for (let guess = 0; guess < 60; guess++) {
+    const cand = new Date(Date.UTC(t.y, t.m - 1, t.d, 0, 0) + guess * 9e5);
+    const n = nyTime(cand);
+    if (n.d === t.d && n.h === hour && n.min === minute) return cand;
   }
   return null;
 }
 
-let openTime = nextMarketOpen();
+function sessionState() {
+  const now = new Date();
+  const t = nyTime(now);
+  const weekend = t.wd === "Sat" || t.wd === "Sun";
+  const mins = t.h * 60 + t.min;
+  const OPEN = 9 * 60 + 30, CLOSE = 16 * 60;
+
+  if (!weekend && mins >= OPEN && mins < CLOSE) {
+    return { state: "open", until: nyMoment(now, 16, 0),
+             label: "do zamknięcia sesji", note: "sesja trwa" };
+  }
+  // szukamy najblizszego otwarcia
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(now.getTime() + i * 864e5);
+    const nt = nyTime(d);
+    if (nt.wd === "Sat" || nt.wd === "Sun") continue;
+    const open = nyMoment(d, 9, 30);
+    if (open && open > now) {
+      const sameDay = i === 0;
+      return { state: "before", until: open, label: "do otwarcia sesji",
+               note: sameDay ? "otwarcie dzisiaj" : null };
+    }
+  }
+  return { state: "unknown", until: null, label: "do otwarcia sesji", note: null };
+}
+
+let session = sessionState();
 function tick() {
-  if (!openTime || openTime <= new Date()) openTime = nextMarketOpen();
-  if (!openTime) { $("countdown").textContent = "—"; return; }
-  let s = Math.max(0, Math.floor((openTime - new Date()) / 1000));
+  if (!session.until || session.until <= new Date()) session = sessionState();
+  const el = $("countdown");
+  if (!session.until) { el.textContent = "—"; return; }
+  let s = Math.max(0, Math.floor((session.until - new Date()) / 1000));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-  $("countdown").textContent = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-  $("openInfo").textContent = "otwarcie " + openTime.toLocaleString("pl-PL",
-    { weekday: "short", hour: "2-digit", minute: "2-digit" }) + " czasu lokalnego";
+  el.textContent = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  el.className = "countdown" + (session.state === "open" ? " up" : "");
+  $("openInfo").innerHTML = session.state === "open"
+    ? `<b>sesja trwa</b> — zamknięcie ${session.until.toLocaleString("pl-PL", { hour: "2-digit", minute: "2-digit" })} czasu lokalnego`
+    : `${session.label} · ${session.until.toLocaleString("pl-PL", { weekday: "short", hour: "2-digit", minute: "2-digit" })} czasu lokalnego`;
+  const hdr = document.querySelector("#countdown").closest(".card").querySelector("h2");
+  if (hdr) hdr.textContent = session.state === "open" ? "Do zamknięcia sesji" : "Do otwarcia sesji";
 }
 setInterval(tick, 1000); tick();
 
@@ -299,7 +333,10 @@ async function main() {
   const snap = snapDoc.data();
   const features = snap.features || {};
 
-  $("dataStamp").textContent = `ostatnia sesja ${snap.date} · zamknięcie ${fmt(snap.last_close)}`;
+  const stampNote = session.state === "open"
+    ? " · <b>predykcja dotyczy trwającej sesji</b>"
+    : session.state === "before" ? " · predykcja na najbliższą sesję" : "";
+  $("dataStamp").innerHTML = `ostatnia zamknięta sesja ${snap.date} · zamknięcie ${fmt(snap.last_close)}${stampNote}`;
 
   // Gotowa predykcja policzona przez silnik. Panel jej nie przelicza —
   // ta sama logika w dwoch jezykach predzej czy pozniej by sie rozjechala,
@@ -554,7 +591,13 @@ async function main() {
 
 main().catch(e => {
   console.error(e);
-  alertBox(`<b>Błąd wczytywania:</b> ${e.message}<br><span class="note">Sprawdź reguły Firestore (firebase/firestore.rules) i konfigurację w config.js.</span>`);
+  const perm = /permission|insufficient/i.test(e.message || "");
+  alertBox(perm
+    ? `<b>Firestore odmawia dostępu.</b> Reguły w konsoli Firebase są starsze niż te w repo — `
+      + `brakuje w nich zgody na odczyt kolekcji <code>strategies</code> i <code>predictions</code>.<br>`
+      + `<span class="note">Firebase Console → Firestore Database → Rules → wklej zawartość `
+      + `<code>firebase/firestore.rules</code> → Publish.</span>`
+    : `<b>Błąd wczytywania:</b> ${e.message}<br><span class="note">Sprawdź konfigurację w config.js.</span>`);
 });
 </script>
 </body>
