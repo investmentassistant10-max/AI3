@@ -70,3 +70,27 @@ function dailyUpdate() {
   saveCandles_(candles);
   Logger.log('Dzienna aktualizacja: sprawdzonych ' + candles.length + ' ostatnich świec.');
 }
+
+/**
+ * Ustawia (idempotentnie) codzienny trigger czasowy dla dailyUpdate().
+ * Uruchom RAZ ręcznie z edytora. Bezpieczne do wielokrotnego odpalania —
+ * usuwa stare triggery dla tej funkcji przed dodaniem nowego, więc się nie
+ * zduplikuje. Godzina odpalenia liczona jest w strefie czasowej projektu
+ * (Project Settings -> General settings -> Time zone -> ustaw Europe/Warsaw).
+ */
+function setupDailyTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'dailyUpdate') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  ScriptApp.newTrigger('dailyUpdate')
+    .timeBased()
+    .everyDays(1)
+    .atHour(8)
+    .nearMinute(0)
+    .create();
+
+  Logger.log('Trigger ustawiony: dailyUpdate codziennie ok. 8:00 (strefa czasowa projektu).');
+}
