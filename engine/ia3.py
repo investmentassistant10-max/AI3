@@ -30,11 +30,19 @@ ROOT = Path(__file__).resolve().parent.parent
 STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
 
 
-def _check_deps():
+# Ktora komenda czego naprawde potrzebuje. Raport czy kalibracja czytaja
+# wylacznie lokalna baze — nie ma powodu, zeby wymagaly biblioteki do chmury.
+NEEDS_FIREBASE = {"sync", "push", "snapshot", "predict", "pulse", "run"}
+
+
+def _check_deps(command):
     """Podpowiada, czego brakuje, zamiast wysypywac sie na imporcie."""
+    required = [("numpy", "numpy"), ("pandas", "pandas")]
+    if command in NEEDS_FIREBASE:
+        required.append(("firebase_admin", "firebase-admin"))
+
     missing = []
-    for mod, pkg in (("numpy", "numpy"), ("pandas", "pandas"),
-                     ("firebase_admin", "firebase-admin")):
+    for mod, pkg in required:
         try:
             __import__(mod)
         except ImportError:
@@ -309,7 +317,7 @@ def main():
         sys.argv[1] = ALIASES[sys.argv[1]]
 
     args = ap.parse_args()
-    _check_deps()
+    _check_deps(args.command)
     {"sync": cmd_sync, "search": cmd_search, "exits": cmd_exits,
      "validate": cmd_validate, "diag": cmd_diag, "push": cmd_push,
      "report": cmd_report, "run": cmd_run, "snapshot": cmd_snapshot,
