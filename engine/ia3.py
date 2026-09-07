@@ -22,6 +22,21 @@ ROOT = Path(__file__).resolve().parent.parent
 STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
 
 
+def _check_deps():
+    """Podpowiada, czego brakuje, zamiast wysypywac sie na imporcie."""
+    missing = []
+    for mod, pkg in (("numpy", "numpy"), ("pandas", "pandas"),
+                     ("firebase_admin", "firebase-admin")):
+        try:
+            __import__(mod)
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        print("Brakuje bibliotek: " + ", ".join(missing))
+        print("Zainstaluj: python3 -m pip install --user " + " ".join(missing))
+        sys.exit(1)
+
+
 def cmd_sync(args):
     import sync_prices
     sync_prices.main()
@@ -189,6 +204,7 @@ def main():
     p.add_argument("--top", type=int, default=20)
 
     args = ap.parse_args()
+    _check_deps()
     {"sync": cmd_sync, "search": cmd_search, "exits": cmd_exits,
      "validate": cmd_validate, "diag": cmd_diag, "push": cmd_push,
      "report": cmd_report, "run": cmd_run, "snapshot": cmd_snapshot,
