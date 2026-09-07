@@ -12,6 +12,5 @@ firebase/*serviceAccountKey*.json
 firebase/*.json
 !firebase/firestore.rules
 .env
-
 # macOS
 .DS_Store

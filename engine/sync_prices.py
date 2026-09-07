@@ -6,7 +6,7 @@ Pobiera TYLKO dni nowsze niż ostatni dzień już zapisany lokalnie — nie
 (pierwsze uruchomienie) pobiera całą historię, tak jak jest w Firestore.
 
 Użycie:
-    source .venv/bin/activate
+    pip3 install --user -r requirements.txt   (raz)
     python3 sync_prices.py
 """
 import sqlite3
