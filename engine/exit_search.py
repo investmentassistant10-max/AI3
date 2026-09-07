@@ -16,7 +16,6 @@ from evaluate import split_search_treasury
 from strategy import build_mask
 from backtest import Bars, ENTRY_NEXT_OPEN
 from exits import optimize, describe_exit
-import fastcore
 
 ROOT = Path(__file__).resolve().parent.parent
 STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
@@ -50,7 +49,6 @@ CREATE INDEX IF NOT EXISTS idx_exit_edge ON exit_rules(edge_mean DESC);
 def run(top=20, entry=ENTRY_NEXT_OPEN, quiet=False):
     df, _ = build()
     search_df, _ = split_search_treasury(df)
-    data = fastcore.FastData(search_df)
     bars = Bars(search_df, max_days=25)
 
     conn = sqlite3.connect(STRATEGY_DB)

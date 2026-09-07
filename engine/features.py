@@ -166,7 +166,6 @@ def add_features(df):
     # ================= EKSTREMA I OBSUNIECIA =================
     running_max = close.cummax()
     out["drawdown"] = (close / running_max - 1.0) * 100.0
-    high_252 = close.rolling(252).max()
     out["days_since_high_252"] = (
         close.rolling(252).apply(lambda w: len(w) - 1 - int(np.argmax(w)), raw=True)
     )

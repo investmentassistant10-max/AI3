@@ -228,7 +228,8 @@ def revalidate(conn, data, masks, top=REVALIDATE_TOP):
     kasowane, bo informacja o tym, ze cos przestalo dzialac, tez jest wiedza.
     """
     import fastcore
-    from rating import compute_rating
+    from rating import compute_rating, load_correlation_factor
+    from search import total_trials, CANDIDATE_THRESHOLD
 
     rows = conn.execute(
         """SELECT id, definition, horizon FROM strategies
@@ -238,7 +239,6 @@ def revalidate(conn, data, masks, top=REVALIDATE_TOP):
     if not rows:
         return 0, 0
 
-    from rating import load_correlation_factor
     n_trials = total_trials(conn)
     corr = load_correlation_factor(conn)
     now = datetime.now(timezone.utc).isoformat()
@@ -344,6 +344,7 @@ def main():
 
     cycle = 0
     systematic_done = False
+    parents_pool = PARENTS_POOL
     # pierwszy push zaraz po starcie, kolejne co PUSH_INTERVAL_SECONDS
     last_push = time.time() - PUSH_INTERVAL_SECONDS
 
@@ -372,12 +373,23 @@ def main():
             break
 
         # --- 3. ewolucja ---
-        parents = load_parents(conn)
+        parents = load_parents(conn, parents_pool)
         if parents:
             log(f"faza: ewolucja ({len(parents)} rodzicow)")
             children = list(evolve(parents, EVOLVE_BATCH, seed=int(time.time())))
             n, kept = evaluate_batch(children, data, masks, conn, seen, len(seen), corr_factor=corr)
             log(f"  sprawdzonych {n:,}, nowych kandydatow {kept}")
+
+            # Gdy prawie wszystkie mutacje okazuja sie juz sprawdzone, okolica
+            # najlepszych znalezisk jest przeszukana na wylot. Zamiast kreccic
+            # sie w kolko, siegamy glebiej w ranking po nowych rodzicow.
+            fresh_ratio = n / max(EVOLVE_BATCH, 1)
+            if fresh_ratio < 0.15:
+                parents_pool = min(parents_pool * 2, 2000)
+                log(f"  okolica wyczerpana ({fresh_ratio:.0%} nowych) — "
+                    f"rozszerzam pule rodzicow do {parents_pool}")
+            elif fresh_ratio > 0.7 and parents_pool > PARENTS_POOL:
+                parents_pool = max(PARENTS_POOL, parents_pool // 2)
         if stopper.stop:
             break
 
