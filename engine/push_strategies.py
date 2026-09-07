@@ -29,6 +29,22 @@ COLLECTION = "strategies"
 META_COLLECTION = "engine_meta"
 
 
+def firestore_safe_definition(strat):
+    """
+    Firestore nie obsluguje tablic zagniezdzonych w tablicach, a nasze
+    warunki to lista list: [["close_position", "<", 0.15], ...].
+    Zamieniamy kazdy warunek na mape — liste map Firestore przyjmuje.
+    """
+    return {
+        "id": strat.get("id"),
+        "horizon": strat["horizon"],
+        "conditions": [
+            {"feature": f, "op": op, "threshold": float(th)}
+            for f, op, th in strat["conditions"]
+        ],
+    }
+
+
 def get_firestore():
     if not firebase_admin._apps:
         firebase_admin.initialize_app(credentials.Certificate(str(KEY_PATH)))
@@ -55,7 +71,7 @@ def push(top=100):
     for r in rows:
         doc = db.collection(COLLECTION).document(r["id"])
         payload = {
-            "definition": json.loads(r["definition"]),
+            "definition": firestore_safe_definition(json.loads(r["definition"])),
             "description": r["description"],
             "horizon": r["horizon"],
             "rating": r["rating"],
