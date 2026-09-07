@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local data & secrets — nigdy nie trafiają do repo
+data/*.db
+data/*.sqlite
+data/*.csv
+firebase/*serviceAccountKey*.json
+firebase/*.json
+!firebase/firestore.rules
+.env
+
+# macOS
+.DS_Store
