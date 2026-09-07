@@ -33,6 +33,9 @@ aktywne strategie w jedną predykcję na dziś / 2D / 3D.
 
 ## Szkic struktury danych w Firestore
 ```
+spx_daily/{YYYY-MM-DD}                          # ceny — Faza 1, gotowe
+  date, open, high, low, close, volume
+
 strategies/{strategyId}
   definition: { ... parametry strategii ... }
   rating: { accuracy, stability, frequency, overall }
