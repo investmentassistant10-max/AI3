@@ -119,11 +119,21 @@ def cmd_report(args):
     for r in conn.execute("SELECT status, COUNT(*) n FROM strategies GROUP BY status ORDER BY n DESC"):
         print(f"    {r['status']:<22} {r['n']:>8,}")
 
-    import math
+    from rating import significance_threshold, load_correlation_factor
     if total > 1:
-        th = math.sqrt(2 * math.log(total))
+        corr = load_correlation_factor(conn)
+        th = significance_threshold(total, corr)
+        th_naive = significance_threshold(total, 1.0)
         above = conn.execute("SELECT COUNT(*) FROM strategies WHERE ABS(t_stat) > ?", (th,)).fetchone()[0]
-        print(f"\n  Prog istotnosci po korekcie na liczbe prob: |t| > {th:.2f}")
+        print()
+        if corr > 1.01:
+            print(f"  Kalibracja: hipotezy {corr:.1f}x bardziej skorelowane niz niezalezne proby")
+            print(f"  Efektywnych niezaleznych testow: ~{total/corr:,.0f} z {total:,} hipotez")
+            print(f"  Prog istotnosci:        |t| > {th:.2f}   (bez kalibracji byloby {th_naive:.2f})")
+        else:
+            print(f"  Prog istotnosci: |t| > {th:.2f}")
+            print(f"  BRAK KALIBRACJI — prog liczony zachowawczo, moze odrzucac dobre strategie.")
+            print(f"  Uruchom: python3 ia3.py calibrate")
         print(f"  Hipotez powyzej progu: {above}")
 
     print(f"\n{'='*100}\nTOP 10 WARUNKOW WEJSCIA\n{'='*100}")

@@ -81,7 +81,7 @@ def log(msg, to_file=True):
             f.write(f"{datetime.now().isoformat()} {msg}\n")
 
 
-def db_stats(conn):
+def db_stats(conn, correlation_factor=1.0):
     total = conn.execute("SELECT COUNT(*) FROM strategies").fetchone()[0]
     cand = conn.execute(
         "SELECT COUNT(*) FROM strategies WHERE status='candidate'"
@@ -90,7 +90,8 @@ def db_stats(conn):
         "SELECT MAX(rating) FROM strategies WHERE status='candidate'"
     ).fetchone()[0]
     max_t = conn.execute("SELECT MAX(ABS(t_stat)) FROM strategies").fetchone()[0]
-    threshold = math.sqrt(2 * math.log(total)) if total > 1 else 2.0
+    from rating import significance_threshold
+    threshold = significance_threshold(total, correlation_factor)
     above = conn.execute(
         "SELECT COUNT(*) FROM strategies WHERE ABS(t_stat) > ?", (threshold,)
     ).fetchone()[0]
@@ -100,8 +101,8 @@ def db_stats(conn):
     }
 
 
-def print_status(conn, cycle, elapsed):
-    s = db_stats(conn)
+def print_status(conn, cycle, elapsed, correlation_factor=1.0):
+    s = db_stats(conn, correlation_factor)
     log(
         f"cykl {cycle} | {s['total']:,} hipotez | {s['candidates']:,} kandydatow | "
         f"prog |t|>{s['threshold']:.2f} | ponad progiem: {s['above_threshold']} | "
@@ -117,7 +118,8 @@ def load_parents(conn, limit=PARENTS_POOL):
     return [json.loads(r[0]) for r in rows]
 
 
-def evaluate_batch(strategies, data, masks, conn, seen, n_prior, quiet=True):
+def evaluate_batch(strategies, data, masks, conn, seen, n_prior, quiet=True,
+                   corr_factor=1.0):
     """Ocenia paczke strategii i zapisuje wyniki. Zwraca (ile, ilu kandydatow)."""
     import fastcore
     from strategy import describe
@@ -166,7 +168,7 @@ def evaluate_batch(strategies, data, masks, conn, seen, n_prior, quiet=True):
             })
         else:
             stab, _ = fastcore.stability(data, mask, strat["horizon"], stats["edge_mean"])
-            scores = compute_rating(stats, None, n_prior + n_tested)
+            scores = compute_rating(stats, None, n_prior + n_tested, corr_factor)
             base = (scores["accuracy_score"] * 0.45 + stab * 0.35
                     + scores["frequency_score"] * 0.20)
             rating = round(base * scores["significance_multiplier"], 1)
@@ -230,7 +232,9 @@ def revalidate(conn, data, masks, top=REVALIDATE_TOP):
     if not rows:
         return 0, 0
 
+    from rating import load_correlation_factor
     n_trials = total_trials(conn)
+    corr = load_correlation_factor(conn)
     now = datetime.now(timezone.utc).isoformat()
     demoted = 0
     restored = 0
@@ -254,7 +258,7 @@ def revalidate(conn, data, masks, top=REVALIDATE_TOP):
             continue
 
         stab, _ = fastcore.stability(data, mask, horizon, stats["edge_mean"])
-        scores = compute_rating(stats, None, n_trials)
+        scores = compute_rating(stats, None, n_trials, corr)
         base = (scores["accuracy_score"] * 0.45 + stab * 0.35
                 + scores["frequency_score"] * 0.20)
         rating = round(base * scores["significance_multiplier"], 1)
@@ -318,16 +322,16 @@ def main():
     if problems:
         log(f"UWAGI DO DANYCH: {problems}")
 
-    conn = get_db()
-    for col, typ in (("placebo_p", "REAL"), ("n_conditions", "INTEGER")):
-        try:
-            conn.execute(f"ALTER TABLE strategies ADD COLUMN {col} {typ}")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
+    conn = get_db()   # get_db samo dokłada brakujace kolumny
+    from rating import load_correlation_factor
+    corr = load_correlation_factor(conn)
     seen = {r[0] for r in conn.execute("SELECT id FROM strategies")}
     log(f"W bazie juz: {len(seen):,} sprawdzonych hipotez")
-    s = db_stats(conn)
+    s = db_stats(conn, corr)
+    if corr > 1.01:
+        log(f"Kalibracja: hipotezy sa {corr:.1f}x bardziej skorelowane niz niezalezne proby")
+    else:
+        log("Brak kalibracji — prog liczony zachowawczo. Uruchom: python3 ia3.py calibrate")
     log(f"Prog istotnosci na start: |t| > {s['threshold']:.2f}")
 
     cycle = 0
@@ -343,7 +347,7 @@ def main():
         if not systematic_done:
             log("faza: systematyka (poziomy 1 i 2)")
             gen = list(generate_level1()) + list(generate_level2())
-            n, kept = evaluate_batch(gen, data, masks, conn, seen, len(seen))
+            n, kept = evaluate_batch(gen, data, masks, conn, seen, len(seen), corr_factor=corr)
             log(f"  sprawdzonych {n:,}, nowych kandydatow {kept}")
             systematic_done = True
             if stopper.stop:
@@ -352,7 +356,7 @@ def main():
         # --- 2. eksploracja ---
         log("faza: eksploracja (losowe probki, 3 warunki)")
         gen = generate_level3(seed=int(time.time()), limit=EXPLORE_BATCH)
-        n, kept = evaluate_batch(list(gen), data, masks, conn, seen, len(seen))
+        n, kept = evaluate_batch(list(gen), data, masks, conn, seen, len(seen), corr_factor=corr)
         log(f"  sprawdzonych {n:,}, nowych kandydatow {kept}")
         if stopper.stop:
             break
@@ -362,7 +366,7 @@ def main():
         if parents:
             log(f"faza: ewolucja ({len(parents)} rodzicow)")
             children = list(evolve(parents, EVOLVE_BATCH, seed=int(time.time())))
-            n, kept = evaluate_batch(children, data, masks, conn, seen, len(seen))
+            n, kept = evaluate_batch(children, data, masks, conn, seen, len(seen), corr_factor=corr)
             log(f"  sprawdzonych {n:,}, nowych kandydatow {kept}")
         if stopper.stop:
             break
@@ -424,7 +428,7 @@ def main():
 
     # --- zamkniecie ---
     elapsed = time.time() - t_start
-    s = db_stats(conn)
+    s = db_stats(conn, corr)
     log("=" * 74, to_file=False)
     log(f"Zatrzymany po {elapsed/3600:.2f}h, {cycle} cyklach.")
     log(f"Lacznie w bazie: {s['total']:,} hipotez | kandydatow: {s['candidates']:,}")

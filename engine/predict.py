@@ -74,9 +74,12 @@ CREATE INDEX IF NOT EXISTS idx_pred_settled ON predictions(settled_at);
 
 
 def get_db():
+    from search import ensure_schema
+
     conn = sqlite3.connect(STRATEGY_DB)
     conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
+    ensure_schema(conn)      # kolumny dokladane do schematu strategii
+    conn.executescript(SCHEMA)  # tabela predictions
     conn.commit()
     return conn
 

@@ -13,14 +13,41 @@ import math
 WEIGHTS = {"accuracy": 0.45, "stability": 0.35, "frequency": 0.20}
 
 
-def significance_threshold(n_trials):
+# Ile razy mniej mamy NIEZALEZNYCH testow niz sprawdzonych hipotez.
+# Nasze hipotezy sa mocno skorelowane: "dist_sma_20 > 2" i "dist_sma_10 > 1.5"
+# to praktycznie ta sama teza. Wartosc mierzona empirycznie przez
+# calibrate.py; 1.0 znaczy "brak kalibracji, zakladamy najgorsze".
+DEFAULT_CORRELATION_FACTOR = 1.0
+
+
+def load_correlation_factor(conn, default=DEFAULT_CORRELATION_FACTOR):
+    """Odczytuje wspolczynnik z ostatniej kalibracji. Brak kalibracji = 1.0."""
+    try:
+        row = conn.execute(
+            """SELECT sample_size, effective_n FROM calibration
+               ORDER BY id DESC LIMIT 1"""
+        ).fetchone()
+    except Exception:
+        return default
+    if not row or not row[1]:
+        return default
+    factor = row[0] / row[1]
+    return max(1.0, min(factor, 200.0))   # sanity: nie ufamy skrajnosciom
+
+
+def significance_threshold(n_trials, correlation_factor=DEFAULT_CORRELATION_FACTOR):
     """
     Prog t-stat, ponizej ktorego wynik jest nieodrozninalny od najlepszego
-    przypadku przy takiej liczbie prob. Rosnie z liczba testow.
+    przypadku przy takiej liczbie prob.
+
+    Wzor sqrt(2*ln N) zaklada N NIEZALEZNYCH testow. Nasze niezalezne nie sa,
+    wiec dzielimy liczbe prob przez zmierzony wspolczynnik korelacji. Bez tego
+    prog jest za surowy i odrzucamy hipotezy, ktore moglyby byc prawdziwe.
     """
     if n_trials < 2:
         return 2.0
-    return math.sqrt(2.0 * math.log(n_trials))
+    effective = max(n_trials / max(correlation_factor, 1.0), 2.0)
+    return math.sqrt(2.0 * math.log(effective))
 
 
 def accuracy_score(edge_hit, edge_mean):
@@ -77,7 +104,7 @@ def frequency_score(freq_pct):
     return 10.0
 
 
-def compute_rating(stats, periods, n_trials):
+def compute_rating(stats, periods, n_trials, correlation_factor=DEFAULT_CORRELATION_FACTOR):
     """
     Laczy wszystko w jeden rating 0-100.
 
@@ -97,7 +124,7 @@ def compute_rating(stats, periods, n_trials):
 
     # Bramka istotnosci: im wiecej prob, tym wyzej zawieszona poprzeczka.
     t = stats.get("t_stat")
-    threshold = significance_threshold(n_trials)
+    threshold = significance_threshold(n_trials, correlation_factor)
     if t is None:
         sig_multiplier = 0.0
     else:

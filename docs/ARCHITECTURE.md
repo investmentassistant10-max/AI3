@@ -142,3 +142,32 @@ przewagi sa liczone brutto. Przy przewadze rzedu 0.17% na horyzoncie 1D
 realny koszt round-trip zjadlby 20-45% wyniku, przy 0.38% na 10D — 10-20%.
 Oznacza to, ze ranking moze faworyzowac strategie krotkoterminowe bardziej,
 niz uzasadnialaby to praktyka.
+
+## Wynik kalibracji (2026-09-07)
+
+Pierwszy pomiar na 6000 hipotez, 20 powtorzen z przesunieciem cyklicznym
+zwrotow:
+
+| | |
+|---|---|
+| prog teoretyczny sqrt(2 ln N) | 4.17 |
+| prog **zmierzony** (mediana) | **3.40** |
+| prog ostrozny (95 percentyl) | 3.84 |
+| rozrzut miedzy powtorzeniami | 2.95 - 4.34 |
+| efektywnych niezaleznych testow | ~321 z 6000 |
+
+**Wspolczynnik korelacji: 18.7x.** Z kazdych 19 sprawdzonych hipotez tylko
+jedna niesie niezalezna informacje — reszta to warianty tej samej tezy.
+Wzor teoretyczny zakladal, ze wszystkie sa niezalezne, i przez to zawieszal
+poprzeczke o 0.77 za wysoko.
+
+Silnik uzywa teraz zmierzonego wspolczynnika (`rating.load_correlation_factor`).
+Dla bazy 3.07 mln hipotez prog spadl z 5.47 na 4.90, a liczba hipotez ponad
+progiem wzrosla z 702 do 4814.
+
+Uwaga przy czytaniu tej liczby: 4814 to nie 4814 odkryc. Te same efekty
+wystepuja w dziesiatkach wariantow (rozne progi, rozne konteksty), wiec
+realnych, roznych zjawisk jest tam raczej kilkanascie.
+
+Kalibracje warto powtorzyc po kazdym istotnym rozszerzeniu przestrzeni
+hipotez — wspolczynnik zalezy od tego, jak bardzo cechy sa ze soba zwiazane.

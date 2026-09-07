@@ -92,12 +92,38 @@ def total_trials(conn):
     return n
 
 
+# Kolumny dokladane do schematu juz po tym, jak bazy zaczely istniec.
+# Trzymamy je tutaj, zeby kazdy modul otwierajacy baze dostawal ten sam
+# komplet — wczesniej migracja byla tylko w silniku i predict.py wywracal
+# sie na brakujacej kolumnie.
+LATE_COLUMNS = (
+    ("placebo_p", "REAL"),
+    ("n_conditions", "INTEGER"),
+    ("treasury_n_signals", "INTEGER"),
+    ("treasury_edge_mean", "REAL"),
+    ("treasury_edge_hit", "REAL"),
+    ("treasury_hit_rate", "REAL"),
+    ("treasury_status", "TEXT"),
+    ("treasury_checked_at", "TEXT"),
+)
+
+
+def ensure_schema(conn):
+    """Tworzy tabele i dokłada brakujace kolumny. Bezpieczne do wielokrotnego uzycia."""
+    conn.executescript(SCHEMA)
+    for col, typ in LATE_COLUMNS:
+        try:
+            conn.execute(f"ALTER TABLE strategies ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass  # kolumna juz jest
+    conn.commit()
+    return conn
+
+
 def get_db():
     STRATEGY_DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(STRATEGY_DB)
-    conn.executescript(SCHEMA)
-    conn.commit()
-    return conn
+    return ensure_schema(conn)
 
 
 def save_batch(conn, rows):

@@ -70,6 +70,8 @@ def validate_top(n=10):
 
     conn = sqlite3.connect(STRATEGY_DB)
     conn.row_factory = sqlite3.Row
+    from search import ensure_schema
+    ensure_schema(conn)
     ensure_columns(conn)
 
     used = treasury_budget_used(conn)
