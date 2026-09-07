@@ -16,6 +16,10 @@ IA3 — jeden punkt wejscia z terminala.
     python3 ia3.py score                   skutecznosc dotychczasowych predykcji
     python3 ia3.py calibrate               zmierz realny prog istotnosci
     python3 ia3.py pulse                   wyslij stan silnika do Firestore
+
+Komendy dzialaja tez po polsku:
+    raport, predykcja, wynik, stan, kalibracja, synchronizuj, szukaj,
+    wyjscia, skarbiec, diagnoza, wyslij, migawka, pracuj
 """
 import argparse
 import sqlite3
@@ -213,6 +217,38 @@ def cmd_run(args):
     print("\nGotowe. Podsumowanie: python3 ia3.py report")
 
 
+# Caly projekt mowi po polsku, wiec komendy tez powinny. Angielskie nazwy
+# zostaja — obie formy dzialaja tak samo.
+ALIASES = {
+    "raport": "report",
+    "predykcja": "predict",
+    "prognoza": "predict",
+    "wynik": "score",
+    "skutecznosc": "score",
+    "skuteczność": "score",
+    "stan": "pulse",
+    "puls": "pulse",
+    "kalibracja": "calibrate",
+    "kalibruj": "calibrate",
+    "synchronizuj": "sync",
+    "pobierz": "sync",
+    "szukaj": "search",
+    "wyjscia": "exits",
+    "wyjścia": "exits",
+    "sprawdz": "validate",
+    "sprawdź": "validate",
+    "skarbiec": "validate",
+    "diagnoza": "diag",
+    "wyslij": "push",
+    "wyślij": "push",
+    "migawka": "snapshot",
+    "pracuj": "forever",
+    "licz": "forever",
+    "silnik": "forever",
+    "cykl": "run",
+}
+
+
 def main():
     ap = argparse.ArgumentParser(
         prog="ia3", description="IA3 — silnik statystyczny SP500",
@@ -267,6 +303,10 @@ def main():
     p.add_argument("--minutes", type=float)
     p.add_argument("--level", type=int, choices=[1, 2, 3])
     p.add_argument("--top", type=int, default=20)
+
+    # podmiana polskiej nazwy na wewnetrzna, zanim argparse ja zobaczy
+    if len(sys.argv) > 1 and sys.argv[1] in ALIASES:
+        sys.argv[1] = ALIASES[sys.argv[1]]
 
     args = ap.parse_args()
     _check_deps()
