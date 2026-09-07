@@ -105,6 +105,21 @@
     </div>
   </div>
 
+  <div class="card" style="margin-bottom:14px">
+    <h2>Predykcja według horyzontu</h2>
+    <div class="scroll"><table id="horizonTable">
+      <thead><tr>
+        <th>horyzont</th><th>kierunek</th><th>oczekiwany ruch</th>
+        <th>poziom docelowy</th><th>strategii</th><th>long / short</th><th>zgodność</th>
+      </tr></thead>
+      <tbody><tr><td colspan="7" class="note">wczytuję…</td></tr></tbody>
+    </table></div>
+    <div class="note" style="margin-top:9px">
+      Każdy horyzont liczony osobno — strategia mierząca skutek po 10 dniach nie jest
+      porównywalna z jednodniową i nie wolno ich uśredniać w jedną liczbę.
+    </div>
+  </div>
+
   <div class="grid cols-2" style="margin-bottom:14px">
     <div class="card">
       <h2>Ostatnie 10 sesji i projekcja</h2>
@@ -217,16 +232,21 @@ function matches(features, conditions) {
 }
 
 // ---------- wykres ----------
-function chart(sessions, expectedMove) {
+function chart(sessions, projections) {
+  // projections: [{day, move}] — kolejne horyzonty, moga byc puste
   if (!sessions.length) return "";
   const W = 640, H = 240, P = { t: 14, r: 62, b: 22, l: 8 };
   const closes = sessions.map(s => s.close);
-  const proj = closes[closes.length - 1] * (1 + (expectedMove || 0) / 100);
-  const lo = Math.min(...sessions.map(s => s.low), proj);
-  const hi = Math.max(...sessions.map(s => s.high), proj);
+  const last = closes[closes.length - 1];
+  const pts = (projections || []).filter(p => p && isFinite(p.move))
+    .map(p => ({ day: p.day, price: last * (1 + p.move / 100), move: p.move }));
+  const projPrices = pts.map(p => p.price);
+  const lo = Math.min(...sessions.map(s => s.low), ...projPrices, last);
+  const hi = Math.max(...sessions.map(s => s.high), ...projPrices, last);
   const pad = (hi - lo) * 0.12 || 1;
   const y = v => P.t + (H - P.t - P.b) * (1 - (v - lo + pad) / (hi - lo + 2 * pad));
-  const step = (W - P.l - P.r) / (sessions.length + 0.6);
+  const maxDay = pts.length ? Math.max(...pts.map(p => p.day)) : 0;
+  const step = (W - P.l - P.r) / (sessions.length + Math.min(maxDay, 3) + 0.6);
   const x = i => P.l + step * (i + 0.5);
 
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ostatnie sesje i projekcja">`;
@@ -242,14 +262,17 @@ function chart(sessions, expectedMove) {
       svg += `<text x="${x(i)}" y="${H - 6}" font-size="9" fill="var(--dimmer)" text-anchor="middle">${s.date.slice(5)}</text>`;
     }
   });
-  // projekcja
-  const lastX = x(sessions.length - 1), projX = x(sessions.length + 0.1);
-  const lastY = y(closes[closes.length - 1]), projY = y(proj);
-  const pcol = (expectedMove || 0) >= 0 ? "var(--up)" : "var(--down)";
-  svg += `<line x1="${lastX}" y1="${lastY}" x2="${projX}" y2="${projY}" stroke="${pcol}" stroke-width="1.6" stroke-dasharray="4 3"/>`;
-  svg += `<circle cx="${projX}" cy="${projY}" r="3.5" fill="${pcol}"/>`;
-  svg += `<text x="${projX + 7}" y="${projY + 3.5}" font-size="11" fill="${pcol}" font-weight="600">${proj.toFixed(0)}</text>`;
-  svg += `<text x="${projX + 7}" y="${projY + 16}" font-size="9.5" fill="var(--dimmer)">${pct(expectedMove)}</text>`;
+  // projekcje — osobny punkt na kazdy horyzont
+  const lastX = x(sessions.length - 1), lastY = y(last);
+  let prevX = lastX, prevY = lastY;
+  pts.filter(p => p.day <= 3).sort((a, b) => a.day - b.day).forEach(p => {
+    const px = x(sessions.length - 1 + p.day), py = y(p.price);
+    const col = p.move >= 0 ? "var(--up)" : "var(--down)";
+    svg += `<line x1="${prevX}" y1="${prevY}" x2="${px}" y2="${py}" stroke="${col}" stroke-width="1.6" stroke-dasharray="4 3"/>`;
+    svg += `<circle cx="${px}" cy="${py}" r="3.2" fill="${col}"/>`;
+    svg += `<text x="${px + 6}" y="${py + 3.5}" font-size="10" fill="${col}" font-weight="600">${p.day}D ${p.price.toFixed(0)}</text>`;
+    prevX = px; prevY = py;
+  });
   svg += `</svg>`;
   return svg;
 }
@@ -287,17 +310,43 @@ async function main() {
   // ktore maja dzis zastosowanie
   const matched = all.filter(s => matches(features, s.definition?.conditions || []));
 
+  const wsum = arr => arr.reduce((a, s) => a + (s.rating || 0) / 100, 0);
+
+  // Predykcje liczymy OSOBNO dla kazdego horyzontu. Przewaga strategii
+  // dziesieciodniowej opisuje ruch w ciagu dziesieciu sesji, jednodniowej —
+  // w ciagu jednej. Usrednienie ich w jedna liczbe nie ma sensu wymiarowego
+  // i zawyzalo predykcje na najblizsza sesje.
+  function predictFor(set) {
+    const longs = set.filter(s => (s.edge_mean || 0) > 0);
+    const shorts = set.filter(s => (s.edge_mean || 0) < 0);
+    const wL = wsum(longs), wS = wsum(shorts), wA = wL + wS;
+    const move = wA > 0
+      ? set.reduce((a, s) => a + (s.edge_mean || 0) * (s.rating || 0) / 100, 0) / wA
+      : 0;
+    return {
+      set, longs: longs.length, shorts: shorts.length,
+      wLong: wL, wShort: wS, wAll: wA, move,
+      agreement: wA > 0 ? Math.abs(wL - wS) / wA : 0,
+      avgRating: set.length ? set.reduce((a, s) => a + (s.rating || 0), 0) / set.length : 0,
+    };
+  }
+
+  const HORIZONS = [1, 2, 3, 5, 10];
+  const byHorizon = {};
+  HORIZONS.forEach(h => {
+    const set = matched.filter(s => s.horizon === h);
+    if (set.length) byHorizon[h] = predictFor(set);
+  });
+
+  // naglowek opisuje NAJBLIZSZA SESJE — czyli wylacznie strategie jednodniowe
+  const near = byHorizon[1] || predictFor([]);
+  const overall = predictFor(matched);   // tylko do rozkladu long/short i pewnosci
+
   const longs = matched.filter(s => (s.edge_mean || 0) > 0);
   const shorts = matched.filter(s => (s.edge_mean || 0) < 0);
-  const wsum = arr => arr.reduce((a, s) => a + (s.rating || 0) / 100, 0);
-  const wLong = wsum(longs), wShort = wsum(shorts), wAll = wLong + wShort;
-
-  // wazona predykcja: kazda strategia wnosi swoja przewage z waga rownai ratingowi
-  const expectedMove = wAll > 0
-    ? matched.reduce((a, s) => a + (s.edge_mean || 0) * (s.rating || 0) / 100, 0) / wAll
-    : 0;
-
-  const agreement = wAll > 0 ? Math.abs(wLong - wShort) / wAll : 0;
+  const wLong = overall.wLong, wShort = overall.wShort, wAll = overall.wAll;
+  const expectedMove = near.move;
+  const agreement = overall.agreement;
   const avgRating = matched.length ? matched.reduce((a, s) => a + (s.rating || 0), 0) / matched.length : 0;
   const volp = snap.vol_percentile;
 
@@ -306,21 +355,26 @@ async function main() {
   // ze przewaga sygnalow kontrarianskich rosnie monotonicznie ze zmiennoscia rynku:
   // 0.09% przy spokoju wobec 0.54% przy panice. W spokojnym rynku system powinien
   // deklarowac nizsza pewnosc, nawet gdy strategie sa zgodne.
-  const countFactor = Math.min(matched.length / 8, 1);
+  const countFactor = Math.min((near.set.length || matched.length) / 8, 1);
   const ratingFactor = Math.min(avgRating / 85, 1);
   const volFactor = volp === null || volp === undefined ? 0.7 : 0.55 + 0.45 * volp;
   const confidence = Math.round(agreement * countFactor * ratingFactor * volFactor * 100);
 
   // --- naglowek predykcji ---
+  const noNear = near.set.length === 0;
   const dirLabel = matched.length === 0 ? "BRAK SYGNAŁU"
+    : noNear ? "—"
     : expectedMove > 0.02 ? "W GÓRĘ" : expectedMove < -0.02 ? "W DÓŁ" : "NEUTRALNIE";
-  const dirClass = matched.length === 0 ? "flat"
+  const dirClass = matched.length === 0 || noNear ? "flat"
     : expectedMove > 0.02 ? "up" : expectedMove < -0.02 ? "down" : "flat";
   $("predDir").className = "big " + dirClass;
   $("predDir").textContent = dirLabel;
   $("predDetail").innerHTML = matched.length === 0
     ? "żadna strategia nie ma dziś zastosowania — warunki nie są spełnione"
-    : `oczekiwany ruch <b>${pct(expectedMove)}</b> · pewność <b>${confidence}%</b>`;
+    : near.set.length === 0
+      ? `brak strategii jednodniowych — patrz tabela horyzontów niżej`
+      : `oczekiwany ruch <b>${pct(expectedMove)}</b> · pewność <b>${confidence}%</b> `
+        + `<span class="note">(${near.set.length} ${near.set.length === 1 ? "strategia" : "strategii"} o horyzoncie 1 dnia)</span>`;
 
   $("matchCount").textContent = matched.length;
   $("matchDetail").textContent = `z ${all.length} strategii w bazie (rating ≥ ${CFG.minRating})`;
@@ -338,19 +392,47 @@ async function main() {
   $("volStat").textContent = volp === null || volp === undefined ? "—"
     : `${(volp * 100).toFixed(0)} percentyl ${volp > 0.7 ? "· nerwowo" : volp < 0.3 ? "· spokojnie" : ""}`;
 
+  // --- tabela horyzontow ---
+  const htb = $("horizonTable").querySelector("tbody");
+  const hRows = HORIZONS.filter(h => byHorizon[h]);
+  if (!hRows.length) {
+    htb.innerHTML = `<tr><td colspan="7" class="note">Brak strategii z zastosowaniem dziś.</td></tr>`;
+  } else {
+    htb.innerHTML = hRows.map(h => {
+      const p = byHorizon[h];
+      const up = p.move > 0.02, down = p.move < -0.02;
+      const cls = up ? "up" : down ? "down" : "flat";
+      const label = up ? "wzrost" : down ? "spadek" : "neutralnie";
+      const target = snap.last_close * (1 + p.move / 100);
+      return `<tr>
+        <td><b>${h}D</b></td>
+        <td class="${cls}">${label}</td>
+        <td class="${cls}">${pct(p.move)}</td>
+        <td>${fmt(target)}</td>
+        <td>${p.set.length}</td>
+        <td><span class="pill long">${p.longs}</span> <span class="pill short">${p.shorts}</span></td>
+        <td>${Math.round(p.agreement * 100)}%</td>
+      </tr>`;
+    }).join("");
+  }
+
   // --- wykres ---
   const sessions = snap.recent_sessions || [];
-  $("chart").innerHTML = chart(sessions, expectedMove);
-  $("chartNote").textContent = matched.length
-    ? `Linia przerywana to projekcja: ważona średnia przewag ${matched.length} strategii z zastosowaniem dziś.`
-    : "Brak projekcji — dziś żadna strategia nie ma zastosowania.";
+  const projections = HORIZONS.filter(h => byHorizon[h] && h <= 3)
+    .map(h => ({ day: h, move: byHorizon[h].move }));
+  $("chart").innerHTML = chart(sessions, projections);
+  $("chartNote").textContent = projections.length
+    ? `Punkty przerywane to projekcje na 1, 2 i 3 sesje — każda liczona wyłącznie ze strategii o tym horyzoncie.`
+    : matched.length
+      ? "Strategie z zastosowaniem dziś mają horyzonty dłuższe niż 3 dni — patrz tabela wyżej."
+      : "Brak projekcji — dziś żadna strategia nie ma zastosowania.";
 
   // --- poziomy ---
   const close = snap.last_close, atrPct = snap.atr_14_pct;
   const atrAbs = atrPct ? close * atrPct / 100 : null;
   $("lvlClose").textContent = fmt(close);
   $("lvlEntry").textContent = "≈ " + fmt(close) + " (otwarcie)";
-  $("lvlTarget").textContent = matched.length ? fmt(close * (1 + expectedMove / 100)) : "—";
+  $("lvlTarget").textContent = near.set.length ? fmt(close * (1 + expectedMove / 100)) + " (1D)" : "—";
   $("lvlStop").textContent = atrAbs && matched.length
     ? fmt(close + (expectedMove >= 0 ? -2 : 2) * atrAbs) : "—";
   $("lvlAtr").textContent = atrPct ? `${fmt(atrPct)}% (${fmt(atrAbs)} pkt)` : "—";
@@ -362,10 +444,11 @@ async function main() {
   } else {
     const side = expectedMove > 0 ? "długiej" : "krótkiej";
     const strength = confidence >= 55 ? "wyraźny" : confidence >= 30 ? "umiarkowany" : "słaby";
+    const hs = hRows.map(h => `${h}D ${pct(byHorizon[h].move)}`).join(" · ");
     concl = `Sygnał <b>${strength}</b> po stronie <b>${side}</b>: ${matched.length} `
       + `${matched.length === 1 ? "strategia ma" : "strategii ma"} dziś zastosowanie, `
-      + `${longs.length} wskazuje wzrost, ${shorts.length} spadek, zgodność ${Math.round(agreement * 100)}%. `
-      + `Ważona oczekiwana zmiana: <b>${pct(expectedMove)}</b>.`;
+      + `${longs.length} wskazuje wzrost, ${shorts.length} spadek, zgodność ${Math.round(agreement * 100)}%.`
+      + `<br><br>Oczekiwana zmiana według horyzontu: <b>${hs}</b>.`;
     if (volp !== null && volp !== undefined && volp < 0.3) {
       concl += ` <br><br>Uwaga: rynek jest spokojny (${(volp * 100).toFixed(0)} percentyl zmienności). `
         + `Sygnały kontrariańskie zarabiają głównie na panice — w takich warunkach ich historyczna przewaga spada kilkukrotnie, `
