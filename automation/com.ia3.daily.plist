@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ia3.daily</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>REPLACE_HOME/Documents/IA3/automation/ia3-daily.sh</string>
+    </array>
+
+    <!-- 9:00 czasu lokalnego: po tym, jak Apps Script wrzuci swieca o 8:00,
+         i dlugo przed otwarciem sesji o 15:30. Jesli Mac o tej porze spi,
+         launchd uruchomi zadanie zaraz po przebudzeniu. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>REPLACE_HOME/Documents/IA3/data/automat-launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>REPLACE_HOME/Documents/IA3/data/automat-launchd.log</string>
+</dict>
+</plist>

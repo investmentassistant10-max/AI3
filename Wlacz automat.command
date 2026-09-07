@@ -1,0 +1,1 @@
+automation/Wlacz automat.command

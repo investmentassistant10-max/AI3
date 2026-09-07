@@ -171,3 +171,30 @@ realnych, roznych zjawisk jest tam raczej kilkanascie.
 
 Kalibracje warto powtorzyc po kazdym istotnym rozszerzeniu przestrzeni
 hipotez — wspolczynnik zalezy od tego, jak bardzo cechy sa ze soba zwiazane.
+
+## Automatyzacja — co dzieje sie samo
+
+| godzina | gdzie | co |
+|---|---|---|
+| 8:00 | Apps Script | `dailyUpdate` — swieca z ostatniej sesji do Firestore |
+| 8:15 | Apps Script | `verifyMorningData` — kontrola i wpis do arkusza Log |
+| 9:00 | Mac (launchd) | `ia3-daily.sh` — sync, push, migawka, predykcja |
+| 23:00 | Apps Script | `syncPredictionLog` — zapis predykcji i rozliczenie zaleglych |
+| ciagle | Mac | silnik, gdy go uruchomisz; wysylka do Firestore co 15 minut |
+
+Podzial wynika z ograniczen, nie z upodobania. Apps Script ma limit 6 minut
+na wykonanie funkcji i nie ma numpy — wiec liczenie zostaje na Macu. Mac bywa
+wylaczony — wiec pilnowanie danych i rozliczanie predykcji zostaje w chmurze.
+Jedyne, co robia oba, to rozliczanie predykcji; robia to niezaleznie i zgodnie,
+bo licza z tych samych cen w Firestore.
+
+**Kalendarz sesji** (`sheets/Market.gs` i ta sama logika w panelu) zna weekendy
+i dziewiec swiat NYSE rocznie, w tym ruchome (n-ty poniedzialek miesiaca)
+i Wielki Piatek liczony z daty Wielkanocy. Bez tego system raportowalby brak
+danych jako blad w dni, gdy sesji po prostu nie bylo — i twierdzil, ze sesja
+trwa, w Labor Day.
+
+**Czestotliwosc zapisow do Firestore** zmieniono z "co trzeci cykl" na
+"co 15 minut". Cykle maja rozna dlugosc zaleznie od tego, ile hipotez przejdzie
+do kosztownych etapow, wiec licznik cykli dawal nieprzewidywalna liczbe zapisow
+przy dlugim biegu.

@@ -218,27 +218,80 @@ function nyMoment(base, hour, minute) {
   return null;
 }
 
+
+// Swieta, w ktore NYSE jest zamknieta. Bez nich panel twierdzi, ze sesja
+// trwa, w dni takie jak Labor Day czy Swieto Dziekczynienia.
+function easterSunday(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mo = Math.floor((h + l - 7 * m + 114) / 31);
+  const da = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(y, mo - 1, da));
+}
+function nthWeekday(y, mo, wd, n) {
+  const d = new Date(Date.UTC(y, mo, 1));
+  return new Date(Date.UTC(y, mo, 1 + ((wd - d.getUTCDay() + 7) % 7) + (n - 1) * 7));
+}
+function lastWeekday(y, mo, wd) {
+  const d = new Date(Date.UTC(y, mo + 1, 0));
+  return new Date(Date.UTC(y, mo + 1, 0 - ((d.getUTCDay() - wd + 7) % 7)));
+}
+function observed(d) {
+  const wd = d.getUTCDay();
+  if (wd === 6) return new Date(d.getTime() - 864e5);
+  if (wd === 0) return new Date(d.getTime() + 864e5);
+  return d;
+}
+const isoUTC = d => d.toISOString().slice(0, 10);
+
+const holidayCache = {};
+function marketHolidays(year) {
+  if (holidayCache[year]) return holidayCache[year];
+  const h = {};
+  const add = (d, name) => { h[isoUTC(d)] = name; };
+  add(observed(new Date(Date.UTC(year, 0, 1))), "Nowy Rok");
+  add(nthWeekday(year, 0, 1, 3), "Dzień Martina Luthera Kinga");
+  add(nthWeekday(year, 1, 1, 3), "Dzień Prezydentów");
+  add(new Date(easterSunday(year).getTime() - 2 * 864e5), "Wielki Piątek");
+  add(lastWeekday(year, 4, 1), "Memorial Day");
+  if (year >= 2022) add(observed(new Date(Date.UTC(year, 5, 19))), "Juneteenth");
+  add(observed(new Date(Date.UTC(year, 6, 4))), "Święto Niepodległości USA");
+  add(nthWeekday(year, 8, 1, 1), "Labor Day");
+  add(nthWeekday(year, 10, 4, 4), "Święto Dziękczynienia");
+  add(observed(new Date(Date.UTC(year, 11, 25))), "Boże Narodzenie");
+  holidayCache[year] = h;
+  return h;
+}
+function holidayName(t) {
+  return marketHolidays(t.y)[`${t.y}-${String(t.m).padStart(2,"0")}-${String(t.d).padStart(2,"0")}`] || null;
+}
+
 function sessionState() {
   const now = new Date();
   const t = nyTime(now);
   const weekend = t.wd === "Sat" || t.wd === "Sun";
+  const holiday = holidayName(t);
   const mins = t.h * 60 + t.min;
   const OPEN = 9 * 60 + 30, CLOSE = 16 * 60;
 
-  if (!weekend && mins >= OPEN && mins < CLOSE) {
+  if (!weekend && !holiday && mins >= OPEN && mins < CLOSE) {
     return { state: "open", until: nyMoment(now, 16, 0),
              label: "do zamknięcia sesji", note: "sesja trwa" };
   }
-  // szukamy najblizszego otwarcia
-  for (let i = 0; i < 8; i++) {
+  // szukamy najblizszego otwarcia, pomijajac weekendy i swieta
+  for (let i = 0; i < 12; i++) {
     const d = new Date(now.getTime() + i * 864e5);
     const nt = nyTime(d);
     if (nt.wd === "Sat" || nt.wd === "Sun") continue;
+    if (holidayName(nt)) continue;
     const open = nyMoment(d, 9, 30);
     if (open && open > now) {
-      const sameDay = i === 0;
       return { state: "before", until: open, label: "do otwarcia sesji",
-               note: sameDay ? "otwarcie dzisiaj" : null };
+               closedToday: holiday || (weekend ? "weekend" : null) };
     }
   }
   return { state: "unknown", until: null, label: "do otwarcia sesji", note: null };
@@ -253,9 +306,12 @@ function tick() {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   el.textContent = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   el.className = "countdown" + (session.state === "open" ? " up" : "");
+  const opens = session.until.toLocaleString("pl-PL", { weekday: "short", hour: "2-digit", minute: "2-digit" });
   $("openInfo").innerHTML = session.state === "open"
     ? `<b>sesja trwa</b> — zamknięcie ${session.until.toLocaleString("pl-PL", { hour: "2-digit", minute: "2-digit" })} czasu lokalnego`
-    : `${session.label} · ${session.until.toLocaleString("pl-PL", { weekday: "short", hour: "2-digit", minute: "2-digit" })} czasu lokalnego`;
+    : session.closedToday && session.closedToday !== "weekend"
+      ? `dziś giełda zamknięta — <b>${session.closedToday}</b> · otwarcie ${opens}`
+      : `${session.label} · ${opens} czasu lokalnego`;
   const hdr = document.querySelector("#countdown").closest(".card").querySelector("h2");
   if (hdr) hdr.textContent = session.state === "open" ? "Do zamknięcia sesji" : "Do otwarcia sesji";
 }

@@ -49,8 +49,14 @@ PARENTS_POOL = 120          # z ilu najlepszych bierzemy rodzicow
 PLACEBO_RUNS = 40           # ile przesuniec w tescie placebo
 PLACEBO_MAX_P = 0.05        # powyzej tego kandydat jest odrzucany
 EXITS_EVERY_CYCLES = 3      # co ile cykli dobieramy reguly wyjscia
-PUSH_EVERY_CYCLES = 3       # co ile cykli wypychamy do Firestore
 SYNC_EVERY_CYCLES = 12      # co ile cykli sprawdzamy nowe dane
+
+# Wysylka do Firestore chodzi na zegarze, nie na licznku cykli. Cykl trwa
+# rozne dlugosci zaleznie od tego, ile hipotez przejdzie do kosztownych
+# etapow, wiec licznik cykli dawal nieprzewidywalna czestotliwosc zapisow.
+# Kazdy push to ~100 zapisow dokumentow — przy dlugim biegu warto, zeby
+# zdarzal sie rzadko i regularnie.
+PUSH_INTERVAL_SECONDS = 15 * 60
 REVALIDATE_EVERY_CYCLES = 6 # co ile cykli przeliczamy stare kandydaty
 REVALIDATE_TOP = 800        # ilu najlepszych przeliczamy
 
@@ -333,9 +339,13 @@ def main():
     else:
         log("Brak kalibracji — prog liczony zachowawczo. Uruchom: python3 ia3.py calibrate")
     log(f"Prog istotnosci na start: |t| > {s['threshold']:.2f}")
+    if not args.no_push:
+        log(f"Wysylka do Firestore co {PUSH_INTERVAL_SECONDS // 60} min")
 
     cycle = 0
     systematic_done = False
+    # pierwszy push zaraz po starcie, kolejne co PUSH_INTERVAL_SECONDS
+    last_push = time.time() - PUSH_INTERVAL_SECONDS
 
     while not stopper.stop:
         if deadline and time.time() > deadline:
@@ -392,7 +402,8 @@ def main():
                 log(f"  blad: {e}")
 
         # --- 5. wypchniecie ---
-        if not args.no_push and cycle % PUSH_EVERY_CYCLES == 0:
+        if not args.no_push and time.time() - last_push >= PUSH_INTERVAL_SECONDS:
+            last_push = time.time()
             log("faza: wysylka do Firestore")
             try:
                 import push_strategies
