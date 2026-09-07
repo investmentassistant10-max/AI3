@@ -131,7 +131,7 @@ def generate_level3(horizons=HORIZONS, seed=None, limit=None):
         h = rng.choice(horizons)
         yield make_strategy([sig, c1, c2], h)
         n += 1
-        if limit and n >= limit:
+        if limit is not None and n >= limit:
             return
 
 

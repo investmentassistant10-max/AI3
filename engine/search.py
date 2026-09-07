@@ -156,17 +156,22 @@ def run_search(hours=None, minutes=None, level=None, quiet=False):
     if not quiet and n_prior:
         print(f"Juz sprawdzonych we wczesniejszych przebiegach: {n_prior:,}\n")
 
+    # Poziom 3 losuje z przestrzeni 3.2 mln kombinacji i sam z siebie nigdy
+    # sie nie konczy. Bez limitu czasu musi dostac limit liczby hipotez,
+    # inaczej `search` bez argumentow wisialby w nieskonczonosc.
+    level3_limit = None if limit_s else 200_000
+
     if level == 1:
         gens = [("poziom 1", generate_level1())]
     elif level == 2:
         gens = [("poziom 2", generate_level2())]
     elif level == 3:
-        gens = [("poziom 3", generate_level3(seed=int(time.time())))]
+        gens = [("poziom 3", generate_level3(seed=int(time.time()), limit=level3_limit))]
     else:
         gens = [
             ("poziom 1", generate_level1()),
             ("poziom 2", generate_level2()),
-            ("poziom 3", generate_level3(seed=int(time.time()))),
+            ("poziom 3", generate_level3(seed=int(time.time()), limit=level3_limit)),
         ]
 
     batch, n_tested, n_kept = [], 0, 0

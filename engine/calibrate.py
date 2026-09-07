@@ -71,8 +71,10 @@ def run(n_runs=20, sample=6000, quiet=False):
 
     # ta sama probka hipotez w kazdym powtorzeniu — porownujemy jablka z jablkami
     rng = random.Random(20260907)
+    # UWAGA: generate_level3 bez `limit` jest nieskonczony — filtrowanie
+    # po enumerate nie zatrzymuje iteracji, tylko odsiewa elementy.
     pool = list(generate_level1()) + list(generate_level2())
-    pool += [s for i, s in enumerate(generate_level3(seed=7)) if i < sample]
+    pool += list(generate_level3(seed=7, limit=sample))
     strategies = rng.sample(pool, min(sample, len(pool)))
 
     if not quiet:
