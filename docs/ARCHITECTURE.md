@@ -65,3 +65,24 @@ IA3/
   dashboard/  # statyczna strona na GitHub Pages (Faza 5)
   docs/       # ten dokument i inne notatki
 ```
+
+## Co wiemy o danych (i czego nie)
+
+Baza zaczyna sie w 2000 roku — 6709 sesji. To wystarcza statystycznie, ale
+caly zbior lezy w jednej epoce makroekonomicznej: po bance internetowej,
+w wiekszosci w erze niskich stop i luzowania ilosciowego. Brakuje w niej
+lat 80. i 90., krachu 1987 i rezimu wysokich stop procentowych.
+
+Dlatego kazdy wynik sprawdzamy osobno w erach (`diagnostics.by_era`),
+a nie tylko srednio po calosci.
+
+### Ustalenia na temat sygnalu close_position
+- Przewaga dodatnia we wszystkich 6 ocenialnych okresach — efekt nie jest
+  wlasnoscia samej ery QE.
+- Sila efektu rosnie monotonicznie ze zmiennoscia rynku: 0.09% przy
+  spokoju, 0.54% przy panice (percentyl zmiennosci > 0.9).
+- Slaby wynik na skarbcu (2024-2026) tlumaczy sie tym, ze byl to okres
+  spokojny — sygnal nie wygasl, tylko nie mial okazji.
+
+Wniosek praktyczny: predykcja powinna byc wazona rezimem zmiennosci.
+W spokojnym rynku system powinien deklarowac nizsza pewnosc.
