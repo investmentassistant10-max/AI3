@@ -10,6 +10,7 @@ IA3 — jeden punkt wejscia z terminala.
     python3 ia3.py report                  co jest w bazie
     python3 ia3.py push --top 100          wyslij wyniki do Firestore
     python3 ia3.py run --hours 8           pelny cykl: sync, search, exits, push
+    python3 ia3.py forever                 silnik ciagly — uruchom i zostaw
 """
 import argparse
 import sqlite3
@@ -101,6 +102,16 @@ def cmd_report(args):
     print()
 
 
+def cmd_forever(args):
+    import subprocess
+    cmd = [sys.executable, str(Path(__file__).parent / "run_forever.py")]
+    if args.max_hours:
+        cmd += ["--max-hours", str(args.max_hours)]
+    if args.no_push:
+        cmd.append("--no-push")
+    subprocess.run(cmd)
+
+
 def cmd_run(args):
     print(">>> 1/4 synchronizacja cen")
     try:
@@ -149,6 +160,10 @@ def main():
 
     sub.add_parser("report", help="co jest w bazie")
 
+    p = sub.add_parser("forever", help="silnik ciagly — uruchom i zostaw")
+    p.add_argument("--max-hours", type=float)
+    p.add_argument("--no-push", action="store_true")
+
     p = sub.add_parser("run", help="pelny cykl")
     p.add_argument("--hours", type=float, default=1.0)
     p.add_argument("--minutes", type=float)
@@ -158,7 +173,8 @@ def main():
     args = ap.parse_args()
     {"sync": cmd_sync, "search": cmd_search, "exits": cmd_exits,
      "validate": cmd_validate, "diag": cmd_diag, "push": cmd_push,
-     "report": cmd_report, "run": cmd_run}[args.command](args)
+     "report": cmd_report, "run": cmd_run,
+     "forever": cmd_forever}[args.command](args)
 
 
 if __name__ == "__main__":
