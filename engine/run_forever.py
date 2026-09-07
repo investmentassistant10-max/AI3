@@ -286,6 +286,9 @@ def main():
             try:
                 import push_strategies
                 push_strategies.push(100)
+                import daily_snapshot
+                daily_snapshot.push(daily_snapshot.build_snapshot())
+                log("  migawka na dzis wyslana")
             except Exception as e:
                 log(f"  nie udalo sie wyslac ({e}) — wyniki zostaja lokalnie")
 

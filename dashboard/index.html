@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IA3 — panel predykcji SP500</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a;
+    --text: #e6e9ef; --dim: #8b93a3; --dimmer: #5d6472;
+    --up: #3fbf7f; --down: #e5534b; --neutral: #6b7280; --accent: #4a9eff;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f7f9; --panel: #ffffff; --panel2: #f0f2f5; --line: #dfe3e9;
+      --text: #12151a; --dim: #5a6373; --dimmer: #8b93a3;
+      --up: #128a55; --down: #c8352c; --neutral: #6b7280; --accent: #1f6feb;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    padding: 20px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    flex-wrap: wrap; gap: 12px; margin-bottom: 18px;
+  }
+  h1 { font-size: 19px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  h1 span { color: var(--dim); font-weight: 400; }
+  .grid { display: grid; gap: 14px; }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .cols-2 { grid-template-columns: 1.6fr 1fr; }
+  @media (max-width: 900px) { .cols-3, .cols-2 { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px;
+  }
+  .card h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--dim); margin: 0 0 12px; font-weight: 600;
+  }
+  .big { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; }
+  .mid { font-size: 20px; font-weight: 600; }
+  .sub { color: var(--dim); font-size: 12px; margin-top: 5px; }
+  .up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--neutral); }
+  .row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: none; }
+  .row .k { color: var(--dim); } .row .v { font-variant-numeric: tabular-nums; font-weight: 550; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th {
+    text-align: left; color: var(--dim); font-weight: 600; font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.06em; padding: 7px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+  td.desc { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--text); }
+  .bar { height: 7px; border-radius: 4px; background: var(--panel2); overflow: hidden; display: flex; }
+  .bar i { display: block; height: 100%; }
+  .pill {
+    display: inline-block; padding: 1px 7px; border-radius: 20px; font-size: 10.5px;
+    font-weight: 600; background: var(--panel2); color: var(--dim);
+  }
+  .pill.long { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
+  .pill.short { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
+  .countdown { font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 650; letter-spacing: -0.01em; }
+  .note { color: var(--dimmer); font-size: 11.5px; line-height: 1.5; }
+  .warn {
+    background: color-mix(in srgb, var(--down) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--down) 30%, transparent);
+    color: var(--text); padding: 11px 13px; border-radius: 8px; font-size: 13px; margin-bottom: 14px;
+  }
+  .scroll { overflow-x: auto; }
+  footer { margin-top: 20px; color: var(--dimmer); font-size: 11.5px; line-height: 1.6; }
+  svg { display: block; width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>IA3 <span>— panel predykcji SP500</span></h1>
+    <div class="note" id="dataStamp">wczytuję…</div>
+  </header>
+
+  <div id="alerts"></div>
+
+  <div class="grid cols-3" style="margin-bottom:14px">
+    <div class="card">
+      <h2>Predykcja na najbliższą sesję</h2>
+      <div class="big" id="predDir">—</div>
+      <div class="sub" id="predDetail">czekam na dane</div>
+    </div>
+    <div class="card">
+      <h2>Do otwarcia sesji</h2>
+      <div class="countdown" id="countdown">—</div>
+      <div class="sub" id="openInfo">NYSE 9:30 ET</div>
+    </div>
+    <div class="card">
+      <h2>Strategie z zastosowaniem dziś</h2>
+      <div class="big" id="matchCount">—</div>
+      <div class="sub" id="matchDetail">z bazy strategii</div>
+    </div>
+  </div>
+
+  <div class="grid cols-2" style="margin-bottom:14px">
+    <div class="card">
+      <h2>Ostatnie 10 sesji i projekcja</h2>
+      <div id="chart"></div>
+      <div class="note" id="chartNote" style="margin-top:9px"></div>
+    </div>
+    <div class="card">
+      <h2>Rozkład sygnałów</h2>
+      <div class="bar" id="dirBar" style="margin-bottom:12px"><i style="width:100%;background:var(--panel2)"></i></div>
+      <div class="row"><span class="k">Long</span><span class="v" id="longStat">—</span></div>
+      <div class="row"><span class="k">Short</span><span class="v" id="shortStat">—</span></div>
+      <div class="row"><span class="k">Waga long / short</span><span class="v" id="weightStat">—</span></div>
+      <div class="row"><span class="k">Średni rating</span><span class="v" id="avgRating">—</span></div>
+      <div class="row"><span class="k">Zgodność kierunku</span><span class="v" id="agreeStat">—</span></div>
+      <div class="row"><span class="k">Reżim zmienności</span><span class="v" id="volStat">—</span></div>
+    </div>
+  </div>
+
+  <div class="grid cols-2" style="margin-bottom:14px">
+    <div class="card">
+      <h2>Poziomy</h2>
+      <div class="row"><span class="k">Ostatnie zamknięcie</span><span class="v" id="lvlClose">—</span></div>
+      <div class="row"><span class="k">Wejście (otwarcie sesji)</span><span class="v" id="lvlEntry">—</span></div>
+      <div class="row"><span class="k">Cel przy trafnej predykcji</span><span class="v" id="lvlTarget">—</span></div>
+      <div class="row"><span class="k">Sugerowany stop (2×ATR)</span><span class="v" id="lvlStop">—</span></div>
+      <div class="row"><span class="k">ATR 14</span><span class="v" id="lvlAtr">—</span></div>
+      <div class="note" style="margin-top:10px">
+        Wejście realizowane jest na otwarciu sesji, którego cena nie jest jeszcze znana —
+        poziomy liczone są od ostatniego zamknięcia i przesuną się o lukę otwarcia.
+      </div>
+    </div>
+    <div class="card">
+      <h2>Wnioski</h2>
+      <div id="conclusion" class="note" style="font-size:13px;color:var(--text)">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Strategie, których warunki są dziś spełnione</h2>
+    <div class="scroll"><table id="matchTable">
+      <thead><tr>
+        <th>kier.</th><th>rating</th><th>przewaga</th><th>traf.</th>
+        <th>hor.</th><th>epiz.</th><th>warunki</th>
+      </tr></thead>
+      <tbody><tr><td colspan="7" class="note">wczytuję…</td></tr></tbody>
+    </table></div>
+  </div>
+
+  <footer id="footer"></footer>
+</div>
+
+<script src="config.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, getDoc, collection, query, orderBy, limit, where, getDocs }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const CFG = window.IA3_CONFIG;
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 2) => v === null || v === undefined || !isFinite(v) ? "—" : v.toFixed(d);
+const pct = (v, d = 3) => v === null || v === undefined || !isFinite(v) ? "—" : (v >= 0 ? "+" : "") + v.toFixed(d) + "%";
+
+function alertBox(msg) {
+  $("alerts").insertAdjacentHTML("beforeend", `<div class="warn">${msg}</div>`);
+}
+
+// ---------- odliczanie do otwarcia NYSE ----------
+function nextMarketOpen() {
+  const now = new Date();
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(now.getTime() + i * 864e5);
+    const nyParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: CFG.marketOpen.timeZone, weekday: "short",
+      year: "numeric", month: "2-digit", day: "2-digit"
+    }).formatToParts(d);
+    const g = t => nyParts.find(p => p.type === t).value;
+    if (["Sat", "Sun"].includes(g("weekday"))) continue;
+    // szukamy momentu, w ktorym w Nowym Jorku jest 9:30 tego dnia
+    for (let guess = 0; guess < 48; guess++) {
+      const cand = new Date(Date.UTC(+g("year"), +g("month") - 1, +g("day"), 0, 0) + guess * 18e5);
+      const hm = new Intl.DateTimeFormat("en-US", {
+        timeZone: CFG.marketOpen.timeZone, hour: "2-digit", minute: "2-digit", hour12: false
+      }).format(cand);
+      if (hm === "09:30" && cand > now) return cand;
+    }
+  }
+  return null;
+}
+
+let openTime = nextMarketOpen();
+function tick() {
+  if (!openTime || openTime <= new Date()) openTime = nextMarketOpen();
+  if (!openTime) { $("countdown").textContent = "—"; return; }
+  let s = Math.max(0, Math.floor((openTime - new Date()) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  $("countdown").textContent = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  $("openInfo").textContent = "otwarcie " + openTime.toLocaleString("pl-PL",
+    { weekday: "short", hour: "2-digit", minute: "2-digit" }) + " czasu lokalnego";
+}
+setInterval(tick, 1000); tick();
+
+// ---------- dopasowanie strategii do dzisiejszego stanu rynku ----------
+function matches(features, conditions) {
+  if (!Array.isArray(conditions) || !conditions.length) return false;
+  return conditions.every(c => {
+    const v = features[c.feature];
+    if (v === undefined || v === null || !isFinite(v)) return false;
+    return c.op === "<" ? v < c.threshold : v > c.threshold;
+  });
+}
+
+// ---------- wykres ----------
+function chart(sessions, expectedMove) {
+  if (!sessions.length) return "";
+  const W = 640, H = 240, P = { t: 14, r: 62, b: 22, l: 8 };
+  const closes = sessions.map(s => s.close);
+  const proj = closes[closes.length - 1] * (1 + (expectedMove || 0) / 100);
+  const lo = Math.min(...sessions.map(s => s.low), proj);
+  const hi = Math.max(...sessions.map(s => s.high), proj);
+  const pad = (hi - lo) * 0.12 || 1;
+  const y = v => P.t + (H - P.t - P.b) * (1 - (v - lo + pad) / (hi - lo + 2 * pad));
+  const step = (W - P.l - P.r) / (sessions.length + 0.6);
+  const x = i => P.l + step * (i + 0.5);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ostatnie sesje i projekcja">`;
+  // swiece
+  sessions.forEach((s, i) => {
+    const up = s.close >= s.open;
+    const col = up ? "var(--up)" : "var(--down)";
+    const bw = Math.min(step * 0.55, 16);
+    const yo = y(s.open), yc = y(s.close);
+    svg += `<line x1="${x(i)}" y1="${y(s.high)}" x2="${x(i)}" y2="${y(s.low)}" stroke="${col}" stroke-width="1.2"/>`;
+    svg += `<rect x="${x(i) - bw / 2}" y="${Math.min(yo, yc)}" width="${bw}" height="${Math.max(Math.abs(yc - yo), 1.5)}" fill="${col}"/>`;
+    if (i % 3 === 0 || i === sessions.length - 1) {
+      svg += `<text x="${x(i)}" y="${H - 6}" font-size="9" fill="var(--dimmer)" text-anchor="middle">${s.date.slice(5)}</text>`;
+    }
+  });
+  // projekcja
+  const lastX = x(sessions.length - 1), projX = x(sessions.length + 0.1);
+  const lastY = y(closes[closes.length - 1]), projY = y(proj);
+  const pcol = (expectedMove || 0) >= 0 ? "var(--up)" : "var(--down)";
+  svg += `<line x1="${lastX}" y1="${lastY}" x2="${projX}" y2="${projY}" stroke="${pcol}" stroke-width="1.6" stroke-dasharray="4 3"/>`;
+  svg += `<circle cx="${projX}" cy="${projY}" r="3.5" fill="${pcol}"/>`;
+  svg += `<text x="${projX + 7}" y="${projY + 3.5}" font-size="11" fill="${pcol}" font-weight="600">${proj.toFixed(0)}</text>`;
+  svg += `<text x="${projX + 7}" y="${projY + 16}" font-size="9.5" fill="var(--dimmer)">${pct(expectedMove)}</text>`;
+  svg += `</svg>`;
+  return svg;
+}
+
+// ---------- glowna logika ----------
+async function main() {
+  if (!CFG || CFG.firebase.apiKey === "WKLEJ_TUTAJ") {
+    alertBox("<b>Brak konfiguracji Firebase.</b> Uzupełnij <code>config.js</code> — instrukcja w komentarzu w tym pliku.");
+    return;
+  }
+  const db = getFirestore(initializeApp(CFG.firebase));
+
+  const snapDoc = await getDoc(doc(db, "daily_snapshot", "latest"));
+  if (!snapDoc.exists()) {
+    alertBox("<b>Brak migawki na dziś.</b> Uruchom <code>python3 ia3.py snapshot</code>.");
+    return;
+  }
+  const snap = snapDoc.data();
+  const features = snap.features || {};
+
+  $("dataStamp").textContent = `ostatnia sesja ${snap.date} · zamknięcie ${fmt(snap.last_close)}`;
+
+  const qs = await getDocs(query(
+    collection(db, "strategies"),
+    where("rating", ">=", CFG.minRating),
+    orderBy("rating", "desc"),
+    limit(CFG.strategyLimit)
+  ));
+  const all = qs.docs.map(d => d.data());
+  if (!all.length) {
+    alertBox("<b>Brak strategii w bazie.</b> Uruchom silnik i wypchnij wyniki: <code>python3 ia3.py push</code>.");
+    return;
+  }
+
+  // ktore maja dzis zastosowanie
+  const matched = all.filter(s => matches(features, s.definition?.conditions || []));
+
+  const longs = matched.filter(s => (s.edge_mean || 0) > 0);
+  const shorts = matched.filter(s => (s.edge_mean || 0) < 0);
+  const wsum = arr => arr.reduce((a, s) => a + (s.rating || 0) / 100, 0);
+  const wLong = wsum(longs), wShort = wsum(shorts), wAll = wLong + wShort;
+
+  // wazona predykcja: kazda strategia wnosi swoja przewage z waga rownai ratingowi
+  const expectedMove = wAll > 0
+    ? matched.reduce((a, s) => a + (s.edge_mean || 0) * (s.rating || 0) / 100, 0) / wAll
+    : 0;
+
+  const agreement = wAll > 0 ? Math.abs(wLong - wShort) / wAll : 0;
+  const avgRating = matched.length ? matched.reduce((a, s) => a + (s.rating || 0), 0) / matched.length : 0;
+  const volp = snap.vol_percentile;
+
+  // Pewnosc: zgodnosc kierunku x liczba strategii x ich jakosc x rezim zmiennosci.
+  // Ostatni czynnik jest tu nieprzypadkowo — badania na danych 2000-2026 pokazaly,
+  // ze przewaga sygnalow kontrarianskich rosnie monotonicznie ze zmiennoscia rynku:
+  // 0.09% przy spokoju wobec 0.54% przy panice. W spokojnym rynku system powinien
+  // deklarowac nizsza pewnosc, nawet gdy strategie sa zgodne.
+  const countFactor = Math.min(matched.length / 8, 1);
+  const ratingFactor = Math.min(avgRating / 85, 1);
+  const volFactor = volp === null || volp === undefined ? 0.7 : 0.55 + 0.45 * volp;
+  const confidence = Math.round(agreement * countFactor * ratingFactor * volFactor * 100);
+
+  // --- naglowek predykcji ---
+  const dirLabel = matched.length === 0 ? "BRAK SYGNAŁU"
+    : expectedMove > 0.02 ? "W GÓRĘ" : expectedMove < -0.02 ? "W DÓŁ" : "NEUTRALNIE";
+  const dirClass = matched.length === 0 ? "flat"
+    : expectedMove > 0.02 ? "up" : expectedMove < -0.02 ? "down" : "flat";
+  $("predDir").className = "big " + dirClass;
+  $("predDir").textContent = dirLabel;
+  $("predDetail").innerHTML = matched.length === 0
+    ? "żadna strategia nie ma dziś zastosowania — warunki nie są spełnione"
+    : `oczekiwany ruch <b>${pct(expectedMove)}</b> · pewność <b>${confidence}%</b>`;
+
+  $("matchCount").textContent = matched.length;
+  $("matchDetail").textContent = `z ${all.length} strategii w bazie (rating ≥ ${CFG.minRating})`;
+
+  // --- rozklad ---
+  const pL = wAll > 0 ? wLong / wAll * 100 : 0;
+  $("dirBar").innerHTML = wAll > 0
+    ? `<i style="width:${pL}%;background:var(--up)"></i><i style="width:${100 - pL}%;background:var(--down)"></i>`
+    : `<i style="width:100%;background:var(--panel2)"></i>`;
+  $("longStat").innerHTML = `<span class="pill long">${longs.length}</span>`;
+  $("shortStat").innerHTML = `<span class="pill short">${shorts.length}</span>`;
+  $("weightStat").textContent = `${fmt(wLong)} / ${fmt(wShort)}`;
+  $("avgRating").textContent = matched.length ? fmt(avgRating, 1) : "—";
+  $("agreeStat").textContent = matched.length ? Math.round(agreement * 100) + "%" : "—";
+  $("volStat").textContent = volp === null || volp === undefined ? "—"
+    : `${(volp * 100).toFixed(0)} percentyl ${volp > 0.7 ? "· nerwowo" : volp < 0.3 ? "· spokojnie" : ""}`;
+
+  // --- wykres ---
+  const sessions = snap.recent_sessions || [];
+  $("chart").innerHTML = chart(sessions, expectedMove);
+  $("chartNote").textContent = matched.length
+    ? `Linia przerywana to projekcja: ważona średnia przewag ${matched.length} strategii z zastosowaniem dziś.`
+    : "Brak projekcji — dziś żadna strategia nie ma zastosowania.";
+
+  // --- poziomy ---
+  const close = snap.last_close, atrPct = snap.atr_14_pct;
+  const atrAbs = atrPct ? close * atrPct / 100 : null;
+  $("lvlClose").textContent = fmt(close);
+  $("lvlEntry").textContent = "≈ " + fmt(close) + " (otwarcie)";
+  $("lvlTarget").textContent = matched.length ? fmt(close * (1 + expectedMove / 100)) : "—";
+  $("lvlStop").textContent = atrAbs && matched.length
+    ? fmt(close + (expectedMove >= 0 ? -2 : 2) * atrAbs) : "—";
+  $("lvlAtr").textContent = atrPct ? `${fmt(atrPct)}% (${fmt(atrAbs)} pkt)` : "—";
+
+  // --- wnioski ---
+  let concl;
+  if (matched.length === 0) {
+    concl = "<b>Dziś nie ma na czym grać.</b> Żadna ze strategii w bazie nie ma spełnionych warunków — to normalne i zdarza się często. System nie zgaduje, kiedy nie ma podstaw.";
+  } else {
+    const side = expectedMove > 0 ? "długiej" : "krótkiej";
+    const strength = confidence >= 55 ? "wyraźny" : confidence >= 30 ? "umiarkowany" : "słaby";
+    concl = `Sygnał <b>${strength}</b> po stronie <b>${side}</b>: ${matched.length} `
+      + `${matched.length === 1 ? "strategia ma" : "strategii ma"} dziś zastosowanie, `
+      + `${longs.length} wskazuje wzrost, ${shorts.length} spadek, zgodność ${Math.round(agreement * 100)}%. `
+      + `Ważona oczekiwana zmiana: <b>${pct(expectedMove)}</b>.`;
+    if (volp !== null && volp !== undefined && volp < 0.3) {
+      concl += ` <br><br>Uwaga: rynek jest spokojny (${(volp * 100).toFixed(0)} percentyl zmienności). `
+        + `Sygnały kontrariańskie zarabiają głównie na panice — w takich warunkach ich historyczna przewaga spada kilkukrotnie, `
+        + `dlatego pewność jest tu obniżona mimo zgodności strategii.`;
+    }
+    if (shorts.length > 0) {
+      concl += ` <br><br>Strona krótka wypadła słabo w testach z ostatnich dwóch lat — traktuj sygnały spadkowe raczej jako powód do wstrzymania się niż do gry na spadek.`;
+    }
+  }
+  $("conclusion").innerHTML = concl;
+
+  // --- tabela ---
+  const tb = $("matchTable").querySelector("tbody");
+  if (!matched.length) {
+    tb.innerHTML = `<tr><td colspan="7" class="note">Dziś żadna strategia nie ma spełnionych warunków.</td></tr>`;
+  } else {
+    tb.innerHTML = matched.slice(0, 40).map(s => {
+      const isLong = (s.edge_mean || 0) > 0;
+      const conds = (s.definition?.conditions || [])
+        .map(c => `${c.feature} ${c.op} ${c.threshold}`).join(" ORAZ ");
+      return `<tr>
+        <td><span class="pill ${isLong ? "long" : "short"}">${isLong ? "LONG" : "SHORT"}</span></td>
+        <td>${fmt(s.rating, 1)}</td>
+        <td class="${isLong ? "up" : "down"}">${pct(s.edge_mean)}</td>
+        <td>${fmt(s.hit_rate, 1)}%</td>
+        <td>${s.horizon}d</td>
+        <td>${s.n_episodes ?? "—"}</td>
+        <td class="desc">${conds}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  // --- stopka ---
+  const metaDoc = await getDoc(doc(db, "engine_meta", "latest"));
+  const meta = metaDoc.exists() ? metaDoc.data() : {};
+  const tested = meta.total_hypotheses_tested;
+  const thr = tested ? Math.sqrt(2 * Math.log(tested)) : null;
+  $("footer").innerHTML =
+    `Silnik sprawdził <b>${tested ? tested.toLocaleString("pl-PL") : "—"}</b> hipotez. `
+    + `Próg istotności po korekcie na tę liczbę prób: <b>|t| &gt; ${thr ? thr.toFixed(2) : "—"}</b>. `
+    + `Dane od 2000 roku, ostatnie dwa lata trzymane poza procesem szukania jako skarbiec.<br>`
+    + `Wszystkie liczby to statystyki historyczne, nie prognozy ani rekomendacje inwestycyjne. `
+    + `Przewaga rzędu 0,2% na transakcję znika przy kosztach transakcyjnych powyżej tego poziomu.`;
+}
+
+main().catch(e => {
+  console.error(e);
+  alertBox(`<b>Błąd wczytywania:</b> ${e.message}<br><span class="note">Sprawdź reguły Firestore (firebase/firestore.rules) i konfigurację w config.js.</span>`);
+});
+</script>
+</body>
+</html>

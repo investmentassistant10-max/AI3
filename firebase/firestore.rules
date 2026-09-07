@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// Reguly dostepu do Firestore.
+//
+// Dashboard jest strona statyczna bez logowania, wiec musi miec prawo
+// ODCZYTU tych kolekcji, ktore wyswietla. Zapis jest zablokowany dla
+// wszystkich — dane wprowadza wylacznie kod serwerowy (Apps Script
+// i Python), ktory uzywa konta serwisowego i regul nie podlega.
+//
+// Wgranie: Firebase Console -> Firestore Database -> zakladka Rules
+// -> wklej ponizsze -> Publish.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ceny dzienne — publiczny odczyt
+    match /spx_daily/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // strategie i ich oceny — publiczny odczyt
+    match /strategies/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // migawka na dzis (wartosci cech dla ostatniej sesji)
+    match /daily_snapshot/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // metadane silnika
+    match /engine_meta/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // wszystko inne domyslnie zamkniete
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

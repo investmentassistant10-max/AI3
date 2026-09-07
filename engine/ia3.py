@@ -11,6 +11,7 @@ IA3 — jeden punkt wejscia z terminala.
     python3 ia3.py push --top 100          wyslij wyniki do Firestore
     python3 ia3.py run --hours 8           pelny cykl: sync, search, exits, push
     python3 ia3.py forever                 silnik ciagly — uruchom i zostaw
+    python3 ia3.py snapshot                migawka na dzis dla dashboardu
 """
 import argparse
 import sqlite3
@@ -51,6 +52,20 @@ def cmd_diag(args):
 def cmd_push(args):
     import push_strategies
     push_strategies.push(args.top)
+
+
+def cmd_snapshot(args):
+    import daily_snapshot
+    snap = daily_snapshot.build_snapshot()
+    from pathlib import Path as _P
+    import json as _j
+    out = _P(daily_snapshot.LOCAL_OUT)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_j.dumps(snap, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Migawka na {snap['date']}: zamkniecie {snap['last_close']}")
+    if not args.local:
+        daily_snapshot.push(snap)
+        print("Wyslano do Firestore.")
 
 
 def cmd_report(args):
@@ -160,6 +175,9 @@ def main():
 
     sub.add_parser("report", help="co jest w bazie")
 
+    p = sub.add_parser("snapshot", help="migawka na dzis dla dashboardu")
+    p.add_argument("--local", action="store_true")
+
     p = sub.add_parser("forever", help="silnik ciagly — uruchom i zostaw")
     p.add_argument("--max-hours", type=float)
     p.add_argument("--no-push", action="store_true")
@@ -173,7 +191,7 @@ def main():
     args = ap.parse_args()
     {"sync": cmd_sync, "search": cmd_search, "exits": cmd_exits,
      "validate": cmd_validate, "diag": cmd_diag, "push": cmd_push,
-     "report": cmd_report, "run": cmd_run,
+     "report": cmd_report, "run": cmd_run, "snapshot": cmd_snapshot,
      "forever": cmd_forever}[args.command](args)
 
 
