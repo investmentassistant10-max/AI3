@@ -1,18 +1,17 @@
 """
-Petla przeszukiwania: generuje hipotezy, ocenia je i zapisuje wyniki
-do lokalnej bazy.
+Petla przeszukiwania — wersja na szybkiej sciezce numpy.
 
-Zasady:
-- Szuka WYLACZNIE na danych sprzed skarbca. Ostatnie dwa lata pozostaja
-  nietkniete, zeby bylo czym potwierdzic to, co znajdziemy.
-- Kazda sprawdzona hipoteza jest zapisywana, takze ta odrzucona. Licznik
-  prob jest czescia metody statystycznej, nie tylko logiem.
-- Da sie przerwac i wznowic — juz sprawdzone hipotezy nie sa liczone drugi raz.
+Zasady bez zmian:
+- Szuka WYLACZNIE na danych sprzed skarbca.
+- Kazda sprawdzona hipoteza laduje w bazie, takze odrzucona. Licznik prob
+  jest czescia metody statystycznej: im wiecej testow, tym wyzej zawieszona
+  poprzeczka dla kazdego pojedynczego wyniku.
+- Da sie przerwac i wznowic.
 
 Uzycie:
-    python3 search.py                 # pelny przebieg
-    python3 search.py --minutes 10    # ograniczony czasowo
-    python3 search.py --singles-only  # tylko strategie jednowarunkowe
+    python3 search.py                      # poziomy 1 i 2 (systematycznie)
+    python3 search.py --hours 8            # + losowe probkowanie poziomu 3
+    python3 search.py --level 1
 """
 import argparse
 import json
@@ -22,9 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from features import build
-from evaluate import split_search_treasury, evaluate, stability_by_period
-from strategy import generate_single, generate_pairs, build_mask, describe, count_space
+from evaluate import split_search_treasury
+from strategy import (
+    generate_level1, generate_level2, generate_level3,
+    describe, space_sizes, SIGNAL_CONDITIONS, CONTEXT_CONDITIONS,
+)
 from rating import compute_rating
+import fastcore
 
 ROOT = Path(__file__).resolve().parent.parent
 STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
@@ -35,6 +38,7 @@ CREATE TABLE IF NOT EXISTS strategies (
     definition      TEXT NOT NULL,
     description     TEXT,
     horizon         INTEGER,
+    n_conditions    INTEGER,
     n_signals       INTEGER,
     n_episodes      INTEGER,
     frequency_pct   REAL,
@@ -70,8 +74,10 @@ CREATE TABLE IF NOT EXISTS search_runs (
 );
 """
 
+CANDIDATE_THRESHOLD = 40.0
 
-def get_strategy_db():
+
+def get_db():
     STRATEGY_DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(STRATEGY_DB)
     conn.executescript(SCHEMA)
@@ -79,180 +85,195 @@ def get_strategy_db():
     return conn
 
 
-def known_ids(conn):
-    return {row[0] for row in conn.execute("SELECT id FROM strategies")}
-
-
-def total_tested(conn):
-    return conn.execute("SELECT COUNT(*) FROM strategies").fetchone()[0]
-
-
 def save_batch(conn, rows):
     if not rows:
         return
     conn.executemany(
-        """
-        INSERT OR REPLACE INTO strategies (
-            id, definition, description, horizon,
+        """INSERT OR REPLACE INTO strategies (
+            id, definition, description, horizon, n_conditions,
             n_signals, n_episodes, frequency_pct,
-            mean, base_mean, edge_mean,
-            hit_rate, base_hit_rate, edge_hit,
-            t_stat, p_value,
-            accuracy_score, stability_score, frequency_score,
+            mean, base_mean, edge_mean, hit_rate, base_hit_rate, edge_hit,
+            t_stat, p_value, accuracy_score, stability_score, frequency_score,
             significance_multiplier, rating, status, tested_at
         ) VALUES (
-            :id, :definition, :description, :horizon,
+            :id, :definition, :description, :horizon, :n_conditions,
             :n_signals, :n_episodes, :frequency_pct,
-            :mean, :base_mean, :edge_mean,
-            :hit_rate, :base_hit_rate, :edge_hit,
-            :t_stat, :p_value,
-            :accuracy_score, :stability_score, :frequency_score,
+            :mean, :base_mean, :edge_mean, :hit_rate, :base_hit_rate, :edge_hit,
+            :t_stat, :p_value, :accuracy_score, :stability_score, :frequency_score,
             :significance_multiplier, :rating, :status, :tested_at
-        )
-        """,
+        )""",
         rows,
     )
     conn.commit()
 
 
-def run_search(minutes=None, singles_only=False, max_strategies=None, quiet=False):
+def run_search(hours=None, minutes=None, level=None, quiet=False):
     started = datetime.now(timezone.utc)
-    deadline = time.time() + minutes * 60 if minutes else None
+    limit_s = None
+    if hours:
+        limit_s = hours * 3600
+    elif minutes:
+        limit_s = minutes * 60
+    deadline = time.time() + limit_s if limit_s else None
 
     df, problems = build()
     search_df, treasury_df = split_search_treasury(df)
+    data = fastcore.FastData(search_df)
 
     if not quiet:
-        print(f"Dane do szukania: {search_df.index.min().date()} -> {search_df.index.max().date()} ({len(search_df)} dni)")
+        print(f"Dane do szukania:     {search_df.index.min().date()} -> {search_df.index.max().date()} ({len(search_df)} dni)")
         print(f"Skarbiec (nietykany): {treasury_df.index.min().date()} -> {treasury_df.index.max().date()} ({len(treasury_df)} dni)")
         if problems:
-            print(f"UWAGI DO DANYCH: {problems}")
+            print(f"UWAGI: {problems}")
 
-    conn = get_strategy_db()
-    seen = known_ids(conn)
-    n_prior = len(seen)
-    space_size = count_space(pairs=not singles_only)
-
+    # maski warunkow bazowych — liczone raz, uzywane miliony razy
+    t_pre = time.time()
+    masks = fastcore.precompute(data, SIGNAL_CONDITIONS + CONTEXT_CONDITIONS)
     if not quiet:
-        print(f"Przestrzen hipotez: {space_size:,} | juz sprawdzonych wczesniej: {n_prior:,}")
+        sizes = space_sizes()
+        print(f"Prekomputacja {len(masks)} masek warunkow: {time.time()-t_pre:.1f}s")
+        print(f"Przestrzen: poziom1 {sizes['level1']:,} | poziom2 {sizes['level2']:,} | poziom3 {sizes['level3_full']:,}")
         print()
 
-    generators = [generate_single()]
-    if not singles_only:
-        generators.append(generate_pairs())
+    conn = get_db()
+    seen = {row[0] for row in conn.execute("SELECT id FROM strategies")}
+    n_prior = len(seen)
+    if not quiet and n_prior:
+        print(f"Juz sprawdzonych we wczesniejszych przebiegach: {n_prior:,}\n")
 
-    batch = []
-    n_tested = 0
-    n_kept = 0
+    if level == 1:
+        gens = [("poziom 1", generate_level1())]
+    elif level == 2:
+        gens = [("poziom 2", generate_level2())]
+    elif level == 3:
+        gens = [("poziom 3", generate_level3(seed=int(time.time())))]
+    else:
+        gens = [
+            ("poziom 1", generate_level1()),
+            ("poziom 2", generate_level2()),
+            ("poziom 3", generate_level3(seed=int(time.time()))),
+        ]
+
+    batch, n_tested, n_kept = [], 0, 0
     t0 = time.time()
+    stop = False
 
-    for gen in generators:
+    for label, gen in gens:
+        if stop:
+            break
+        if not quiet:
+            print(f"--- {label} ---", flush=True)
         for strat in gen:
+            if deadline and time.time() > deadline:
+                stop = True
+                break
             if strat["id"] in seen:
                 continue
-            if deadline and time.time() > deadline:
-                break
-            if max_strategies and n_tested >= max_strategies:
-                break
-
             seen.add(strat["id"])
             n_tested += 1
 
-            mask = build_mask(search_df, strat)
-            stats = evaluate(search_df, mask, strat["horizon"])
+            # skladanie maski z prekomputowanych kawalkow
+            mask = None
+            for cond in strat["conditions"]:
+                m = masks.get(tuple(cond))
+                if m is None:
+                    m = fastcore.condition_mask(data, *cond)
+                    masks[tuple(cond)] = m
+                mask = m if mask is None else (mask & m)
 
+            stats = fastcore.evaluate(data, mask, strat["horizon"])
             now = datetime.now(timezone.utc).isoformat()
+            row = {
+                "id": strat["id"],
+                "definition": json.dumps(strat, separators=(",", ":")),
+                "description": describe(strat),
+                "horizon": strat["horizon"],
+                "n_conditions": len(strat["conditions"]),
+                "tested_at": now,
+            }
 
-            if stats is None or stats.get("status") != "ok":
-                # nie da sie tego uczciwie ocenic (za rzadkie, za czeste,
-                # za malo niezaleznych epizodow) — ale i tak liczy sie
-                # do puli prob, bo probe wykonalismy
-                batch.append({
-                    "id": strat["id"],
-                    "definition": json.dumps(strat, separators=(",", ":")),
-                    "description": describe(strat),
-                    "horizon": strat["horizon"],
-                    "n_signals": None, "n_episodes": None, "frequency_pct": None,
+            if stats.get("status") != "ok":
+                row.update({
+                    "n_signals": None, "n_episodes": stats.get("n_episodes"),
+                    "frequency_pct": stats.get("frequency_pct"),
                     "mean": None, "base_mean": None, "edge_mean": None,
                     "hit_rate": None, "base_hit_rate": None, "edge_hit": None,
                     "t_stat": None, "p_value": None,
                     "accuracy_score": None, "stability_score": None,
                     "frequency_score": None, "significance_multiplier": None,
-                    "rating": 0.0,
-                    "status": (stats or {}).get("status", "unevaluable"),
-                    "tested_at": now,
+                    "rating": 0.0, "status": stats.get("status", "unevaluable"),
                 })
             else:
-                periods = stability_by_period(search_df, mask, strat["horizon"])
-                n_trials_so_far = n_prior + n_tested
-                scores = compute_rating(stats, periods, n_trials_so_far)
+                stab_score, _ = fastcore.stability(
+                    data, mask, strat["horizon"], stats["edge_mean"]
+                )
+                scores = compute_rating(
+                    stats, None, n_prior + n_tested
+                )
+                # stability liczymy szybka sciezka, wiec podmieniamy skladowa
+                scores["stability_score"] = stab_score
+                base = (
+                    scores["accuracy_score"] * 0.45
+                    + stab_score * 0.35
+                    + scores["frequency_score"] * 0.20
+                )
+                scores["rating"] = round(base * scores["significance_multiplier"], 1)
 
-                status = "candidate" if scores["rating"] >= 40 else "weak"
-                if scores["rating"] >= 40:
+                is_candidate = scores["rating"] >= CANDIDATE_THRESHOLD
+                if is_candidate:
                     n_kept += 1
-
-                batch.append({
-                    "id": strat["id"],
-                    "definition": json.dumps(strat, separators=(",", ":")),
-                    "description": describe(strat),
-                    "horizon": strat["horizon"],
+                row.update({
                     "n_signals": stats["n_signals"],
                     "n_episodes": stats["n_episodes"],
                     "frequency_pct": stats["frequency_pct"],
-                    "mean": stats["mean"],
-                    "base_mean": stats["base_mean"],
+                    "mean": stats["mean"], "base_mean": stats["base_mean"],
                     "edge_mean": stats["edge_mean"],
                     "hit_rate": stats["hit_rate"],
                     "base_hit_rate": stats["base_hit_rate"],
                     "edge_hit": stats["edge_hit"],
-                    "t_stat": stats["t_stat"],
-                    "p_value": stats["p_value"],
+                    "t_stat": stats["t_stat"], "p_value": stats["p_value"],
                     "accuracy_score": scores["accuracy_score"],
-                    "stability_score": scores["stability_score"],
+                    "stability_score": stab_score,
                     "frequency_score": scores["frequency_score"],
                     "significance_multiplier": scores["significance_multiplier"],
                     "rating": scores["rating"],
-                    "status": status,
-                    "tested_at": now,
+                    "status": "candidate" if is_candidate else "weak",
                 })
 
-            if len(batch) >= 200:
+            batch.append(row)
+            if len(batch) >= 2000:
                 save_batch(conn, batch)
                 batch = []
                 if not quiet:
-                    rate = n_tested / max(time.time() - t0, 0.001)
-                    print(f"  sprawdzonych {n_tested:,} | kandydatow {n_kept} | {rate:.0f}/s", flush=True)
+                    el = time.time() - t0
+                    print(f"  {n_tested:>10,} sprawdzonych | {n_kept:>5} kandydatow "
+                          f"| {n_tested/el:>7,.0f}/s | {el/60:>5.1f} min", flush=True)
 
     save_batch(conn, batch)
 
-    finished = datetime.now(timezone.utc)
+    total = conn.execute("SELECT COUNT(*) FROM strategies").fetchone()[0]
     conn.execute(
         """INSERT INTO search_runs (started_at, finished_at, n_tested, n_kept,
-                                    n_total_seen, data_from, data_to, notes)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (started.isoformat(), finished.isoformat(), n_tested, n_kept,
-         total_tested(conn), str(search_df.index.min().date()),
-         str(search_df.index.max().date()),
-         "singles_only" if singles_only else "full"),
+           n_total_seen, data_from, data_to, notes) VALUES (?,?,?,?,?,?,?,?)""",
+        (started.isoformat(), datetime.now(timezone.utc).isoformat(), n_tested,
+         n_kept, total, str(search_df.index.min().date()),
+         str(search_df.index.max().date()), f"level={level or 'all'}"),
     )
     conn.commit()
 
     if not quiet:
-        elapsed = time.time() - t0
-        print()
-        print(f"Koniec. Sprawdzono {n_tested:,} nowych hipotez w {elapsed/60:.1f} min.")
-        print(f"Kandydatow (rating >= 40): {n_kept}")
-        print(f"Lacznie w bazie: {total_tested(conn):,} hipotez.")
-
+        el = time.time() - t0
+        print(f"\nKoniec. {n_tested:,} nowych hipotez w {el/60:.1f} min ({n_tested/el:,.0f}/s)")
+        print(f"Kandydatow (rating >= {CANDIDATE_THRESHOLD:.0f}): {n_kept:,}")
+        print(f"Lacznie w bazie: {total:,} hipotez")
     conn.close()
     return n_tested, n_kept
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--minutes", type=float, default=None, help="limit czasu w minutach")
-    ap.add_argument("--singles-only", action="store_true", help="tylko strategie jednowarunkowe")
-    ap.add_argument("--max", type=int, default=None, help="limit liczby hipotez")
+    ap.add_argument("--hours", type=float, default=None)
+    ap.add_argument("--minutes", type=float, default=None)
+    ap.add_argument("--level", type=int, choices=[1, 2, 3], default=None)
     args = ap.parse_args()
-
-    run_search(minutes=args.minutes, singles_only=args.singles_only, max_strategies=args.max)
+    run_search(hours=args.hours, minutes=args.minutes, level=args.level)

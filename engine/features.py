@@ -133,7 +133,61 @@ def add_features(df):
     # --- wolumen ---
     out["vol_ratio"] = out["volume"] / out["volume"].rolling(20).mean()
 
+    # ================= REZIM RYNKOWY =================
+    # To jest odpowiedz na asymetrie, ktora silnik odkryl sam: w trendzie
+    # wzrostowym spadki sa odkupywane, ale serie wzrostow NIE sa sprzedawane.
+    # Bez warunku na rezim strategia krotka i dluga sa mieszane do jednego
+    # worka i wzajemnie sie zjadaja.
+    out["above_sma_200"] = (close > out["sma_200"]).astype(float)
+    out["sma_slope_50"] = out["sma_50"].pct_change(20) * 100.0
+    out["sma_slope_200"] = out["sma_200"].pct_change(20) * 100.0
+    out["regime_bull"] = ((close > out["sma_200"]) & (out["sma_slope_200"] > 0)).astype(float)
+    # percentyl zmiennosci w ostatnim roku: 0 = najspokojniej, 1 = najgorzej
+    out["vol_percentile"] = out["vol_20"].rolling(252).rank(pct=True)
+    # rozjezdzanie sie srednich — sila trendu
+    out["sma_spread_5_20"] = (out["sma_5"] / out["sma_20"] - 1.0) * 100.0
+    out["sma_spread_20_50"] = (out["sma_20"] / out["sma_50"] - 1.0) * 100.0
+    out["sma_spread_50_200"] = (out["sma_50"] / out["sma_200"] - 1.0) * 100.0
+
+    # ================= MOMENTUM =================
+    for n in (5, 10, 20, 60):
+        out[f"ret_{n}"] = close.pct_change(n) * 100.0
+    # przyspieszenie: czy ostatnie 5 dni bylo mocniejsze niz srednia z 20
+    out["mom_accel"] = out["ret_5"] - out["ret_20"] / 4.0
+
+    # ================= STRUKTURA SWIECY =================
+    day_range = (out["high"] - out["low"]).replace(0, np.nan)
+    # gdzie w zakresie dnia wypadlo zamkniecie: 0 = przy minimum, 1 = przy maksimum
+    out["close_position"] = (close - out["low"]) / day_range
+    out["body_pct"] = (close - out["open"]).abs() / day_range * 100.0
+    out["upper_wick"] = (out["high"] - out[["open", "close"]].max(axis=1)) / day_range * 100.0
+    out["lower_wick"] = (out[["open", "close"]].min(axis=1) - out["low"]) / day_range * 100.0
+
+    # ================= EKSTREMA I OBSUNIECIA =================
+    running_max = close.cummax()
+    out["drawdown"] = (close / running_max - 1.0) * 100.0
+    high_252 = close.rolling(252).max()
+    out["days_since_high_252"] = (
+        close.rolling(252).apply(lambda w: len(w) - 1 - int(np.argmax(w)), raw=True)
+    )
+
+    # ================= ZMIENNOSC — RELACJE =================
+    vol_5 = out["ret_1"].rolling(5).std() * 100.0
+    out["vol_ratio_5_20"] = vol_5 / out["vol_20"]
+    out["atr_ratio"] = out["atr_14"] / out["atr_14"].rolling(60).mean()
+
+    # ================= KALENDARZ =================
+    out["day_of_week"] = out.index.dayofweek.astype(float)
+    out["day_of_month"] = out.index.day.astype(float)
+    out["month"] = out.index.month.astype(float)
+    days_in_month = out.index.days_in_month
+    out["days_to_month_end"] = (days_in_month - out.index.day).astype(float)
+
+    # ================= WOLUMEN =================
+    out["vol_trend"] = out["volume"].rolling(5).mean() / out["volume"].rolling(60).mean()
+
     return out
+
 
 
 def add_forward_returns(df, horizons=FORWARD_HORIZONS):
