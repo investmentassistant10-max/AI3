@@ -36,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from shrinkage import estimate_hyperparams, shrink
+
 ROOT = Path(__file__).resolve().parent.parent
 STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
 KEY_PATH = ROOT / "firebase" / "serviceAccountKey.json"
@@ -170,7 +172,34 @@ def group_by_family(rows):
     return families
 
 
-def predict_for_horizon(rows, vol_percentile):
+def horizon_sigma(df, horizon, fallback=1.10):
+    """
+    Typowy rozrzut zwrotu na danym horyzoncie, liczony z rzeczywistych danych.
+
+    To jest sigma w mianowniku korekty bayesowskiej: im bardziej zmienny
+    zwrot, tym mniej wiarygodna srednia z n obserwacji i tym mocniej trzeba
+    ja sciagnac.
+    """
+    col = f"fwd_{horizon}"
+    if col not in df.columns:
+        return fallback
+    v = df[col].dropna()
+    return float(v.std()) if len(v) > 100 else fallback
+
+
+def population_hyperparams(strategies):
+    """
+    Rozrzut prawdziwych efektow, oszacowany z calej populacji kandydatow.
+
+    Liczymy to raz na wszystkich strategiach, nie na garstce pasujacych —
+    inaczej korekta zalezalaby od tego, ile akurat dzis pasuje.
+    """
+    edges = [r["edge_mean"] for r in strategies if r["edge_mean"] is not None]
+    eps = [r["n_episodes"] for r in strategies if r["edge_mean"] is not None]
+    return estimate_hyperparams(edges, eps)
+
+
+def predict_for_horizon(rows, vol_percentile, tau=None, sigma=None):
     """
     Prognoza dla jednego horyzontu. Wagą jest rating.
 
@@ -185,11 +214,27 @@ def predict_for_horizon(rows, vol_percentile):
 
     # --- kazda rodzina strategii ma jeden glos, nie tyle ile ma wariantow ---
     families = group_by_family(rows)
-    fam_mean, fam_edge, fam_weight = [], [], []
+    fam_mean, fam_edge, fam_weight, fam_trust = [], [], [], []
     for sig, members in families.items():
         w_in = np.array([m["rating"] / 100.0 for m in members])
-        m_in = np.array([m["mean"] if m["mean"] is not None else 0.0 for m in members])
-        e_in = np.array([m["edge_mean"] if m["edge_mean"] is not None else 0.0 for m in members])
+
+        # Estymaty sciagniete do sredniej — tym mocniej, im mniej epizodow
+        # za nimi stoi. Bez tego prognoza jest systematycznie zawyzona:
+        # przy 20-40 epizodach obserwowana przewaga jest srednio osmiokrotnie
+        # wieksza niz przy 400+, a to szum, nie jakosc.
+        shrunk_e, shrunk_m, trust = [], [], []
+        for m in members:
+            e_raw = m["edge_mean"] if m["edge_mean"] is not None else 0.0
+            base = m["base_mean"] if m["base_mean"] is not None else 0.0
+            e_adj, w_adj = shrink(e_raw, m["n_episodes"], tau=tau, sigma=sigma)
+            shrunk_e.append(e_adj)
+            # prognoza ruchu = dryf rynku (pewny) + skorygowana przewaga
+            shrunk_m.append(base + e_adj)
+            trust.append(w_adj)
+
+        m_in = np.array(shrunk_m)
+        e_in = np.array(shrunk_e)
+        fam_trust.append(float(np.mean(trust)))
         # wewnatrz rodziny usredniamy warianty progu
         fam_mean.append(float((m_in * w_in).sum() / w_in.sum()))
         fam_edge.append(float((e_in * w_in).sum() / w_in.sum()))
@@ -199,6 +244,7 @@ def predict_for_horizon(rows, vol_percentile):
     fam_mean = np.array(fam_mean)
     fam_edge = np.array(fam_edge)
     w = np.array(fam_weight)
+    mean_trust = float(np.mean(fam_trust)) if fam_trust else 0.0
 
     is_long = fam_edge > 0
     w_long, w_short = float(w[is_long].sum()), float(w[~is_long].sum())
@@ -214,7 +260,11 @@ def predict_for_horizon(rows, vol_percentile):
     count_factor = min(n_families / 8.0, 1.0)
     rating_factor = min(avg_rating / 85.0, 1.0)
     vol_factor = 0.7 if vol_percentile is None else 0.55 + 0.45 * vol_percentile
-    confidence = round(agreement * count_factor * rating_factor * vol_factor * 100, 1)
+    # piaty czynnik: ile obserwacji stoi za estymatami. Prognoza oparta
+    # na strategiach z 25 epizodami zasluguje na mniejsza pewnosc niz ta
+    # sama prognoza oparta na strategiach z 500 epizodami.
+    confidence = round(
+        agreement * count_factor * rating_factor * vol_factor * mean_trust * 100, 1)
 
     # szczegoly do pokazania w panelu — panel widzi w Firestore tylko top 100
     # strategii wg ratingu, a te prawie nigdy nie sa tymi, ktore dzis pasuja
@@ -238,6 +288,7 @@ def predict_for_horizon(rows, vol_percentile):
     return {
         "n_matched": len(rows),
         "n_families": n_families,
+        "estimate_trust": round(mean_trust, 3),
         "n_long_families": long_families,
         "n_short_families": short_families,
         "strategies": strategies_detail,
@@ -282,15 +333,22 @@ def make_prediction(quiet=False):
         matched = matched[:MATCHED_LIMIT]   # juz posortowane po ratingu
 
     now = datetime.now(timezone.utc).isoformat()
+    tau, sigma_base = population_hyperparams(strategies)
+
     out = {"date": date, "made_at": now, "close_price": round(float(last["close"]), 2),
            "vol_percentile": vol_p,
+           "shrinkage_tau": round(tau, 4),
            "n_strategies_considered": len(strategies),
            "n_strategies_matched": len(matched),
            "horizons": {}}
 
     for h in HORIZONS:
         rows = [r for r in matched if r["horizon"] == h]
-        p = predict_for_horizon(rows, vol_p)
+        # Rozrzut zwrotow rosnie z horyzontem — na 5 dni jest ponad dwa razy
+        # wiekszy niz na jeden. Bez tego korekta bylaby za slaba dokladnie
+        # tam, gdzie niepewnosc jest najwieksza.
+        sigma_h = horizon_sigma(df, h, fallback=sigma_base)
+        p = predict_for_horizon(rows, vol_p, tau=tau, sigma=sigma_h)
         if p is None:
             continue
         out["horizons"][str(h)] = p
@@ -319,7 +377,8 @@ def make_prediction(quiet=False):
             print(f"  {h}D {arrow} {p['expected_move']:+.3f}%  "
                   f"(przewaga {p['edge_mean']:+.3f}%, pewnosc {p['confidence']:.0f}%, "
                   f"{p['n_matched']} strategii w {p['n_families']} rodzinach: "
-                  f"{p['n_long_families']}L/{p['n_short_families']}S)")
+                  f"{p['n_long_families']}L/{p['n_short_families']}S, "
+                  f"zaufanie do estymat {p['estimate_trust']:.2f})")
     return out
 
 
