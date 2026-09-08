@@ -474,7 +474,7 @@ def main():
             log("faza: dobor regul wyjscia")
             try:
                 import exit_search
-                saved = exit_search.run(top=25, quiet=True)
+                saved = exit_search.run(top=25, quiet=True, conn=conn)
                 log(f"  zapisano {saved} kombinacji wejscie-wyjscie")
             except Exception as e:
                 log(f"  blad: {e}")
@@ -508,9 +508,9 @@ def main():
             log("faza: wysylka do Firestore")
             try:
                 import push_strategies
-                push_strategies.push(100)
+                push_strategies.push(100, conn=conn)
                 import heartbeat
-                n_exits = heartbeat.push_exit_rules()
+                n_exits = heartbeat.push_exit_rules(conn=conn)
                 import daily_snapshot
                 daily_snapshot.push(daily_snapshot.build_snapshot())
                 import predict

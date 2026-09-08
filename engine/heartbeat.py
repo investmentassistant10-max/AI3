@@ -120,7 +120,7 @@ def _trim_history(db):
         batch.commit()
 
 
-def push_exit_rules(top=40):
+def push_exit_rules(top=40, conn=None):
     """
     Najlepsze kombinacje wejscie + wyjscie do Firestore.
 
@@ -136,8 +136,10 @@ def push_exit_rules(top=40):
         firebase_admin.initialize_app(credentials.Certificate(str(KEY_PATH)))
     db = firestore.client()
 
-    conn = sqlite3.connect(STRATEGY_DB, timeout=30.0)
-    conn.execute("PRAGMA busy_timeout=30000")
+    wlasne = conn is None
+    if wlasne:
+        from search import get_db
+        conn = get_db()
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
@@ -146,7 +148,8 @@ def push_exit_rules(top=40):
                WHERE e.trustworthy = 1 AND s.status = 'candidate'
                ORDER BY e.edge_mean DESC LIMIT ?""", (top,)).fetchall()
     except sqlite3.OperationalError:
-        conn.close()
+        if wlasne:
+            conn.close()
         return 0
 
     batch = db.batch()
@@ -166,7 +169,8 @@ def push_exit_rules(top=40):
             "uncertainty": r["uncertainty"],
         })
     batch.commit()
-    conn.close()
+    if wlasne:
+        conn.close()
     return len(rows)
 
 

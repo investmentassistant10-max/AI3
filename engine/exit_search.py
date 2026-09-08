@@ -46,12 +46,28 @@ CREATE INDEX IF NOT EXISTS idx_exit_edge ON exit_rules(edge_mean DESC);
 """
 
 
-def run(top=20, entry=ENTRY_NEXT_OPEN, quiet=False):
+def run(top=20, entry=ENTRY_NEXT_OPEN, quiet=False, conn=None):
+    """
+    Dobiera reguly wyjscia dla najlepszych kandydatow.
+
+    conn — polaczenie do ponownego uzycia. Silnik MUSI je podac.
+
+    Dlaczego to nie jest szczegol: wczesniej ta funkcja otwierala WLASNE
+    polaczenie do bazy, ktora silnik w tej samej chwili trzymal otwarta
+    w trybie WAL. Polaczenie bez busy_timeout nie czeka na zwolnienie
+    blokady, a przy zamykaniu proboje jeszcze przepisac WAL do bazy
+    (checkpoint) — w srodku cudzego zapisu. Efekt: 157 bledow "disk I/O
+    error" w logu, wszystkie z tej jednej fazy, i trzy uszkodzone bazy
+    w ciagu doby. Jedno polaczenie na proces zalatwia sprawe.
+    """
     df, _ = build()
     search_df, _ = split_search_treasury(df)
     bars = Bars(search_df, max_days=25)
 
-    conn = sqlite3.connect(STRATEGY_DB)
+    wlasne = conn is None
+    if wlasne:
+        from search import get_db      # te same pragmy, co reszta systemu
+        conn = get_db()
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
 
@@ -62,6 +78,8 @@ def run(top=20, entry=ENTRY_NEXT_OPEN, quiet=False):
 
     if not rows:
         print("Brak kandydatow. Uruchom najpierw: python3 ia3.py search")
+        if wlasne:
+            conn.close()
         return 0
 
     now = datetime.now(timezone.utc).isoformat()
@@ -98,5 +116,6 @@ def run(top=20, entry=ENTRY_NEXT_OPEN, quiet=False):
             saved += 1
 
     conn.commit()
-    conn.close()
+    if wlasne:
+        conn.close()
     return saved

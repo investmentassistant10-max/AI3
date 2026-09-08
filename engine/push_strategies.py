@@ -51,8 +51,13 @@ def get_firestore():
     return firestore.client()
 
 
-def push(top=100):
-    conn = sqlite3.connect(STRATEGY_DB)
+def push(top=100, conn=None):
+    """conn — polaczenie silnika. Jedno polaczenie na proces; osobne,
+    otwierane w trakcie pracy silnika, potrafilo uszkodzic baze."""
+    wlasne = conn is None
+    if wlasne:
+        from search import get_db
+        conn = get_db()
     conn.row_factory = sqlite3.Row
 
     rows = conn.execute(
@@ -125,7 +130,8 @@ def push(top=100):
 
     print(f"Wyslano {n} strategii do Firestore (kolekcja '{COLLECTION}').")
     print(f"Metadane w '{META_COLLECTION}/latest': {total:,} sprawdzonych hipotez lacznie.")
-    conn.close()
+    if wlasne:
+        conn.close()
 
 
 if __name__ == "__main__":
