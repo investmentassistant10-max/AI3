@@ -30,7 +30,7 @@ run() {
 run sync
 run push --top 100
 run snapshot
-run predict
+run volatility
 run pulse
 
 echo "Zakonczono $(date '+%H:%M:%S')"

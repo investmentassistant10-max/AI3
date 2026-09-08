@@ -3,175 +3,132 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IA3 — panel predykcji SP500</title>
+<title>IA3 — prognoza zmienności SP500</title>
 <style>
   :root {
-    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a;
-    --text: #e6e9ef; --dim: #8b93a3; --dimmer: #5d6472;
-    --up: #3fbf7f; --down: #e5534b; --neutral: #6b7280; --accent: #4a9eff;
+    --bg:#fbfcfd; --panel:#fff; --sunk:#f1f4f8; --line:#e1e6ec; --line2:#cbd3dd;
+    --text:#11151d; --dim:#5b6675; --dimmer:#8b95a3;
+    --calm:#1a7f5a; --mid:#9c6708; --hot:#b3392d; --accent:#1f5fa8;
   }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg: #f6f7f9; --panel: #ffffff; --panel2: #f0f2f5; --line: #dfe3e9;
-      --text: #12151a; --dim: #5a6373; --dimmer: #8b93a3;
-      --up: #128a55; --down: #c8352c; --neutral: #6b7280; --accent: #1f6feb;
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#0d1017; --panel:#151a23; --sunk:#1b212c; --line:#252c38; --line2:#333c4a;
+      --text:#e3e8f0; --dim:#8c96a6; --dimmer:#69737f;
+      --calm:#4fbe8d; --mid:#d9a441; --hot:#e5695c; --accent:#63a4f0;
     }
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    padding: 20px;
+  :root[data-theme="dark"] {
+    --bg:#0d1017; --panel:#151a23; --sunk:#1b212c; --line:#252c38; --line2:#333c4a;
+    --text:#e3e8f0; --dim:#8c96a6; --dimmer:#69737f;
+    --calm:#4fbe8d; --mid:#d9a441; --hot:#e5695c; --accent:#63a4f0;
   }
-  .wrap { max-width: 1180px; margin: 0 auto; }
-  header {
-    display: flex; justify-content: space-between; align-items: baseline;
-    flex-wrap: wrap; gap: 12px; margin-bottom: 18px;
-  }
-  h1 { font-size: 19px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
-  h1 span { color: var(--dim); font-weight: 400; }
-  .grid { display: grid; gap: 14px; }
-  .cols-3 { grid-template-columns: repeat(3, 1fr); }
-  .cols-2 { grid-template-columns: 1.6fr 1fr; }
-  @media (max-width: 900px) { .cols-3, .cols-2 { grid-template-columns: 1fr; } }
-  .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; padding: 16px;
-  }
-  .card h2 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--dim); margin: 0 0 12px; font-weight: 600;
-  }
-  .big { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; }
-  .mid { font-size: 20px; font-weight: 600; }
-  .sub { color: var(--dim); font-size: 12px; margin-top: 5px; }
-  .up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--neutral); }
-  .row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--line); }
-  .row:last-child { border-bottom: none; }
-  .row .k { color: var(--dim); } .row .v { font-variant-numeric: tabular-nums; font-weight: 550; }
-  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  th {
-    text-align: left; color: var(--dim); font-weight: 600; font-size: 10.5px;
-    text-transform: uppercase; letter-spacing: 0.06em; padding: 7px 8px;
-    border-bottom: 1px solid var(--line);
-  }
-  td { padding: 7px 8px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
-  tr:last-child td { border-bottom: none; }
-  td.desc { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; color: var(--text); }
-  .bar { height: 7px; border-radius: 4px; background: var(--panel2); overflow: hidden; display: flex; }
-  .bar i { display: block; height: 100%; }
-  .pill {
-    display: inline-block; padding: 1px 7px; border-radius: 20px; font-size: 10.5px;
-    font-weight: 600; background: var(--panel2); color: var(--dim);
-  }
-  .pill.long { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
-  .pill.short { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
-  .countdown { font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 650; letter-spacing: -0.01em; }
-  .note { color: var(--dimmer); font-size: 11.5px; line-height: 1.5; }
-  .warn {
-    background: color-mix(in srgb, var(--down) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--down) 30%, transparent);
-    color: var(--text); padding: 11px 13px; border-radius: 8px; font-size: 13px; margin-bottom: 14px;
-  }
-  .scroll { overflow-x: auto; }
-  footer { margin-top: 20px; color: var(--dimmer); font-size: 11.5px; line-height: 1.6; }
-  svg { display: block; width: 100%; height: auto; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);padding:22px 18px 60px;
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+  .wrap{max-width:1140px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:baseline;
+    flex-wrap:wrap;gap:10px;margin-bottom:20px}
+  h1{font-size:19px;margin:0;font-weight:650;letter-spacing:-.02em}
+  h1 span{color:var(--dim);font-weight:400}
+  .grid{display:grid;gap:14px}
+  .c3{grid-template-columns:1.3fr 1fr 1fr}
+  .c2{grid-template-columns:1.7fr 1fr}
+  @media(max-width:900px){.c3,.c2{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 17px}
+  .card h2{font-size:10.5px;text-transform:uppercase;letter-spacing:.09em;
+    color:var(--dim);margin:0 0 12px;font-weight:650}
+  .big{font-size:33px;font-weight:660;letter-spacing:-.025em;line-height:1.05;
+    font-variant-numeric:tabular-nums}
+  .mid{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+  .sub{color:var(--dim);font-size:12.5px;margin-top:6px}
+  .calm{color:var(--calm)} .hot{color:var(--hot)} .neutral{color:var(--mid)}
+  .row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;
+    border-bottom:1px solid var(--line)}
+  .row:last-child{border:none}
+  .row .k{color:var(--dim)}
+  .row .v{font-variant-numeric:tabular-nums;font-weight:560}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{text-align:left;color:var(--dimmer);font-size:10px;text-transform:uppercase;
+    letter-spacing:.08em;font-weight:650;padding:0 10px 8px 0;border-bottom:1px solid var(--line2)}
+  td{padding:10px 10px 10px 0;border-bottom:1px solid var(--line);
+    font-variant-numeric:tabular-nums}
+  tr:last-child td{border:none}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:640}
+  .pill.calm{background:color-mix(in srgb,var(--calm) 16%,transparent);color:var(--calm)}
+  .pill.mid{background:color-mix(in srgb,var(--mid) 18%,transparent);color:var(--mid)}
+  .pill.hot{background:color-mix(in srgb,var(--hot) 16%,transparent);color:var(--hot)}
+  .countdown{font-size:27px;font-weight:660;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .note{color:var(--dimmer);font-size:12px;line-height:1.55}
+  .warn{background:color-mix(in srgb,var(--hot) 9%,transparent);
+    border:1px solid color-mix(in srgb,var(--hot) 28%,transparent);
+    padding:12px 14px;border-radius:7px;font-size:13.5px;margin-bottom:14px}
+  .scroll{overflow-x:auto}
+  svg{display:block;width:100%;height:auto}
+  footer{margin-top:22px;padding-top:16px;border-top:1px solid var(--line);
+    color:var(--dimmer);font-size:12px;line-height:1.6}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;
+    background:var(--sunk);padding:1px 5px;border-radius:3px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>IA3 <span>— panel predykcji SP500</span></h1>
-    <div class="note" id="dataStamp">wczytuję…</div>
+    <h1>IA3 <span>— prognoza zmienności SP500</span></h1>
+    <div class="note" id="stamp">wczytuję…</div>
   </header>
 
   <div id="alerts"></div>
 
-  <div class="grid cols-3" style="margin-bottom:14px">
+  <div class="grid c3" style="margin-bottom:14px">
     <div class="card">
-      <h2>Predykcja na najbliższą sesję</h2>
-      <div class="big" id="predDir">—</div>
-      <div class="sub" id="predDetail">czekam na dane</div>
+      <h2>Zmienność w najbliższym tygodniu</h2>
+      <div class="big" id="mainVol">—</div>
+      <div class="sub" id="mainDetail">czekam na dane</div>
     </div>
     <div class="card">
-      <h2>Do otwarcia sesji</h2>
+      <h2>Reżim rynkowy</h2>
+      <div class="mid" id="regime">—</div>
+      <div class="sub" id="regimeDetail"></div>
+    </div>
+    <div class="card">
+      <h2 id="clockLabel">Do otwarcia sesji</h2>
       <div class="countdown" id="countdown">—</div>
-      <div class="sub" id="openInfo">NYSE 9:30 ET</div>
-    </div>
-    <div class="card">
-      <h2>Strategie z zastosowaniem dziś</h2>
-      <div class="big" id="matchCount">—</div>
-      <div class="sub" id="matchDetail">z bazy strategii</div>
+      <div class="sub" id="clockInfo">NYSE 9:30 ET</div>
     </div>
   </div>
 
-  <div class="card" style="margin-bottom:14px">
-    <h2>Predykcja według horyzontu</h2>
-    <div class="scroll"><table id="horizonTable">
-      <thead><tr>
-        <th>horyzont</th><th>kierunek</th><th>prognoza ruchu</th><th>w tym przewaga</th>
-        <th>poziom docelowy</th><th>strategii</th><th>long / short</th><th>zgodność</th>
-      </tr></thead>
-      <tbody><tr><td colspan="8" class="note">wczytuję…</td></tr></tbody>
-    </table></div>
-    <div class="note" style="margin-top:9px">
-      <b>Prognoza ruchu</b> to oczekiwana zmiana ceny; <b>przewaga</b> to jej część,
-      która pochodzi z sygnału, a nie ze zwykłego dryfu rynku. Każdy horyzont liczony osobno — strategia mierząca skutek po 10 dniach nie jest
-      porównywalna z jednodniową i nie wolno ich uśredniać w jedną liczbę.
-    </div>
-  </div>
-
-  <div class="grid cols-2" style="margin-bottom:14px">
+  <div class="grid c2" style="margin-bottom:14px">
     <div class="card">
-      <h2>Ostatnie 10 sesji i projekcja</h2>
+      <h2>Zmienność: 60 ostatnich sesji i prognoza</h2>
       <div id="chart"></div>
-      <div class="note" id="chartNote" style="margin-top:9px"></div>
+      <div class="note" id="chartNote" style="margin-top:10px"></div>
     </div>
     <div class="card">
-      <h2>Rozkład sygnałów</h2>
-      <div class="bar" id="dirBar" style="margin-bottom:12px"><i style="width:100%;background:var(--panel2)"></i></div>
-      <div class="row"><span class="k">Long</span><span class="v" id="longStat">—</span></div>
-      <div class="row"><span class="k">Short</span><span class="v" id="shortStat">—</span></div>
-      <div class="row"><span class="k">Waga long / short</span><span class="v" id="weightStat">—</span></div>
-      <div class="row"><span class="k">Średni rating</span><span class="v" id="avgRating">—</span></div>
-      <div class="row"><span class="k">Zgodność kierunku</span><span class="v" id="agreeStat">—</span></div>
-      <div class="row"><span class="k">Reżim zmienności</span><span class="v" id="volStat">—</span></div>
-    </div>
-  </div>
-
-  <div class="grid cols-2" style="margin-bottom:14px">
-    <div class="card">
-      <h2>Poziomy</h2>
-      <div class="row"><span class="k">Ostatnie zamknięcie</span><span class="v" id="lvlClose">—</span></div>
-      <div class="row"><span class="k">Wejście (otwarcie sesji)</span><span class="v" id="lvlEntry">—</span></div>
-      <div class="row"><span class="k">Cel przy trafnej predykcji</span><span class="v" id="lvlTarget">—</span></div>
-      <div class="row"><span class="k">Sugerowany stop (2×ATR)</span><span class="v" id="lvlStop">—</span></div>
-      <div class="row"><span class="k">ATR 14</span><span class="v" id="lvlAtr">—</span></div>
-      <div class="note" style="margin-top:10px">
-        Wejście realizowane jest na otwarciu sesji, którego cena nie jest jeszcze znana —
-        poziomy liczone są od ostatniego zamknięcia i przesuną się o lukę otwarcia.
-      </div>
-    </div>
-    <div class="card">
-      <h2>Wnioski</h2>
-      <div id="conclusion" class="note" style="font-size:13px;color:var(--text)">—</div>
+      <h2>Co z tego wynika</h2>
+      <div id="practical"></div>
     </div>
   </div>
 
   <div class="card" style="margin-bottom:14px">
-    <h2>Skuteczność dotychczasowych predykcji</h2>
-    <div id="scoreboard" class="note">wczytuję…</div>
-  </div>
-
-  <div class="card">
-    <h2>Strategie, których warunki są dziś spełnione</h2>
-    <div class="scroll"><table id="matchTable">
+    <h2>Prognoza według horyzontu</h2>
+    <div class="scroll"><table id="horizons">
       <thead><tr>
-        <th>kier.</th><th>rating</th><th>przewaga</th><th>traf.</th>
-        <th>hor.</th><th>epiz.</th><th>warunki</th>
+        <th>horyzont</th><th>teraz</th><th>prognoza</th><th>zmiana</th>
+        <th>typowy ruch dnia</th><th>sugerowany stop</th><th>reżim</th>
       </tr></thead>
       <tbody><tr><td colspan="7" class="note">wczytuję…</td></tr></tbody>
     </table></div>
+    <div class="note" style="margin-top:10px">
+      Zmienność podana rocznie, w skali, w jakiej podaje się ją na rynku.
+      <b>Typowy ruch dnia</b> to ta sama liczba przeliczona na jedną sesję.
+      <b>Sugerowany stop</b> to dwa takie ruchy — węższy będzie regularnie
+      wybijany przez zwykły szum.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Skuteczność dotychczasowych prognoz</h2>
+    <div id="score" class="note">wczytuję…</div>
   </div>
 
   <footer id="footer"></footer>
@@ -180,516 +137,246 @@
 <script src="config.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, collection, query, orderBy, limit, where, getDocs }
+import { getFirestore, doc, getDoc }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const CFG = window.IA3_CONFIG;
 const $ = id => document.getElementById(id);
-const fmt = (v, d = 2) => v === null || v === undefined || !isFinite(v) ? "—" : v.toFixed(d);
-const pct = (v, d = 3) => v === null || v === undefined || !isFinite(v) ? "—" : (v >= 0 ? "+" : "") + v.toFixed(d) + "%";
+const fmt = (v,d=2)=> v==null||!isFinite(v) ? "—" : v.toFixed(d);
+const pct = (v,d=1)=> v==null||!isFinite(v) ? "—" : (v>=0?"+":"")+v.toFixed(d)+"%";
+const alertBox = m => $("alerts").insertAdjacentHTML("beforeend",`<div class="warn">${m}</div>`);
 
-function alertBox(msg) {
-  $("alerts").insertAdjacentHTML("beforeend", `<div class="warn">${msg}</div>`);
+// ---------- zegar sesji NYSE (weekendy + swieta) ----------
+function nyTime(d){
+  const p=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",
+    year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false})
+    .formatToParts(d);
+  const g=t=>p.find(x=>x.type===t).value;
+  return {wd:g("weekday"),y:+g("year"),m:+g("month"),d:+g("day"),h:+g("hour")%24,min:+g("minute")};
 }
-
-// ---------- zegar sesji NYSE ----------
-// Sesja trwa 9:30-16:00 czasu nowojorskiego. Panel musi rozrozniac trzy
-// stany, bo w kazdym co innego jest istotne: ile zostalo do wejscia,
-// ile do zamkniecia, i czy predykcja dotyczy juz trwajacej sesji.
-
-function nyTime(d) {
-  const p = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York", weekday: "short", year: "numeric",
-    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
-  }).formatToParts(d);
-  const g = t => p.find(x => x.type === t).value;
-  return { wd: g("weekday"), y: +g("year"), m: +g("month"), d: +g("day"),
-           h: +g("hour") % 24, min: +g("minute") };
-}
-
-/** Moment, w ktorym w Nowym Jorku jest zadana godzina danego dnia. */
-function nyMoment(base, hour, minute) {
-  const t = nyTime(base);
-  for (let guess = 0; guess < 60; guess++) {
-    const cand = new Date(Date.UTC(t.y, t.m - 1, t.d, 0, 0) + guess * 9e5);
-    const n = nyTime(cand);
-    if (n.d === t.d && n.h === hour && n.min === minute) return cand;
+function nyMoment(base,hour,minute){
+  const t=nyTime(base);
+  for(let i=0;i<60;i++){
+    const c=new Date(Date.UTC(t.y,t.m-1,t.d,0,0)+i*9e5);
+    const n=nyTime(c);
+    if(n.d===t.d&&n.h===hour&&n.min===minute) return c;
   }
   return null;
 }
+function easter(y){
+  const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,
+    f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,
+    i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),
+    mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1;
+  return new Date(Date.UTC(y,mo-1,da));
+}
+const nth=(y,mo,wd,n)=>{const d=new Date(Date.UTC(y,mo,1));
+  return new Date(Date.UTC(y,mo,1+((wd-d.getUTCDay()+7)%7)+(n-1)*7));};
+const lastW=(y,mo,wd)=>{const d=new Date(Date.UTC(y,mo+1,0));
+  return new Date(Date.UTC(y,mo+1,0-((d.getUTCDay()-wd+7)%7)));};
+const obs=d=>{const w=d.getUTCDay();
+  return w===6?new Date(d-864e5):w===0?new Date(+d+864e5):d;};
+const isoU=d=>d.toISOString().slice(0,10);
+const hcache={};
+function holidays(y){
+  if(hcache[y])return hcache[y];
+  const h={},add=(d,n)=>h[isoU(d)]=n;
+  add(obs(new Date(Date.UTC(y,0,1))),"Nowy Rok");
+  add(nth(y,0,1,3),"Dzień Martina Luthera Kinga");
+  add(nth(y,1,1,3),"Dzień Prezydentów");
+  add(new Date(easter(y)-2*864e5),"Wielki Piątek");
+  add(lastW(y,4,1),"Memorial Day");
+  if(y>=2022) add(obs(new Date(Date.UTC(y,5,19))),"Juneteenth");
+  add(obs(new Date(Date.UTC(y,6,4))),"Święto Niepodległości USA");
+  add(nth(y,8,1,1),"Labor Day");
+  add(nth(y,10,4,4),"Święto Dziękczynienia");
+  add(obs(new Date(Date.UTC(y,11,25))),"Boże Narodzenie");
+  return hcache[y]=h;
+}
+const holidayOf=t=>holidays(t.y)[`${t.y}-${String(t.m).padStart(2,"0")}-${String(t.d).padStart(2,"0")}`]||null;
 
-
-// Swieta, w ktore NYSE jest zamknieta. Bez nich panel twierdzi, ze sesja
-// trwa, w dni takie jak Labor Day czy Swieto Dziekczynienia.
-function easterSunday(y) {
-  const a = y % 19, b = Math.floor(y / 100), c = y % 100;
-  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
-  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
-  const i = Math.floor(c / 4), k = c % 4;
-  const l = (32 + 2 * e + 2 * i - h - k) % 7;
-  const m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const mo = Math.floor((h + l - 7 * m + 114) / 31);
-  const da = ((h + l - 7 * m + 114) % 31) + 1;
-  return new Date(Date.UTC(y, mo - 1, da));
-}
-function nthWeekday(y, mo, wd, n) {
-  const d = new Date(Date.UTC(y, mo, 1));
-  return new Date(Date.UTC(y, mo, 1 + ((wd - d.getUTCDay() + 7) % 7) + (n - 1) * 7));
-}
-function lastWeekday(y, mo, wd) {
-  const d = new Date(Date.UTC(y, mo + 1, 0));
-  return new Date(Date.UTC(y, mo + 1, 0 - ((d.getUTCDay() - wd + 7) % 7)));
-}
-function observed(d) {
-  const wd = d.getUTCDay();
-  if (wd === 6) return new Date(d.getTime() - 864e5);
-  if (wd === 0) return new Date(d.getTime() + 864e5);
-  return d;
-}
-const isoUTC = d => d.toISOString().slice(0, 10);
-
-const holidayCache = {};
-function marketHolidays(year) {
-  if (holidayCache[year]) return holidayCache[year];
-  const h = {};
-  const add = (d, name) => { h[isoUTC(d)] = name; };
-  add(observed(new Date(Date.UTC(year, 0, 1))), "Nowy Rok");
-  add(nthWeekday(year, 0, 1, 3), "Dzień Martina Luthera Kinga");
-  add(nthWeekday(year, 1, 1, 3), "Dzień Prezydentów");
-  add(new Date(easterSunday(year).getTime() - 2 * 864e5), "Wielki Piątek");
-  add(lastWeekday(year, 4, 1), "Memorial Day");
-  if (year >= 2022) add(observed(new Date(Date.UTC(year, 5, 19))), "Juneteenth");
-  add(observed(new Date(Date.UTC(year, 6, 4))), "Święto Niepodległości USA");
-  add(nthWeekday(year, 8, 1, 1), "Labor Day");
-  add(nthWeekday(year, 10, 4, 4), "Święto Dziękczynienia");
-  add(observed(new Date(Date.UTC(year, 11, 25))), "Boże Narodzenie");
-  holidayCache[year] = h;
-  return h;
-}
-function holidayName(t) {
-  return marketHolidays(t.y)[`${t.y}-${String(t.m).padStart(2,"0")}-${String(t.d).padStart(2,"0")}`] || null;
-}
-
-function sessionState() {
-  const now = new Date();
-  const t = nyTime(now);
-  const weekend = t.wd === "Sat" || t.wd === "Sun";
-  const holiday = holidayName(t);
-  const mins = t.h * 60 + t.min;
-  const OPEN = 9 * 60 + 30, CLOSE = 16 * 60;
-
-  if (!weekend && !holiday && mins >= OPEN && mins < CLOSE) {
-    return { state: "open", until: nyMoment(now, 16, 0),
-             label: "do zamknięcia sesji", note: "sesja trwa" };
+function sessionState(){
+  const now=new Date(), t=nyTime(now);
+  const weekend=t.wd==="Sat"||t.wd==="Sun", hol=holidayOf(t);
+  const mins=t.h*60+t.min, OPEN=570, CLOSE=960;
+  if(!weekend&&!hol&&mins>=OPEN&&mins<CLOSE)
+    return {state:"open",until:nyMoment(now,16,0)};
+  for(let i=0;i<12;i++){
+    const d=new Date(+now+i*864e5), nt=nyTime(d);
+    if(nt.wd==="Sat"||nt.wd==="Sun"||holidayOf(nt)) continue;
+    const o=nyMoment(d,9,30);
+    if(o&&o>now) return {state:"before",until:o,closedToday:hol||(weekend?"weekend":null)};
   }
-  // szukamy najblizszego otwarcia, pomijajac weekendy i swieta
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getTime() + i * 864e5);
-    const nt = nyTime(d);
-    if (nt.wd === "Sat" || nt.wd === "Sun") continue;
-    if (holidayName(nt)) continue;
-    const open = nyMoment(d, 9, 30);
-    if (open && open > now) {
-      return { state: "before", until: open, label: "do otwarcia sesji",
-               closedToday: holiday || (weekend ? "weekend" : null) };
-    }
+  return {state:"unknown",until:null};
+}
+let ses=sessionState();
+function tick(){
+  if(!ses.until||ses.until<=new Date()) ses=sessionState();
+  if(!ses.until){$("countdown").textContent="—";return;}
+  let s=Math.max(0,Math.floor((ses.until-new Date())/1000));
+  const h=Math.floor(s/3600), m=Math.floor((s%3600)/60);
+  $("countdown").textContent=`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+  $("clockLabel").textContent = ses.state==="open"?"Do zamknięcia sesji":"Do otwarcia sesji";
+  const when=ses.until.toLocaleString("pl-PL",{weekday:"short",hour:"2-digit",minute:"2-digit"});
+  $("clockInfo").innerHTML = ses.state==="open"
+    ? `<b>sesja trwa</b> — zamknięcie ${ses.until.toLocaleString("pl-PL",{hour:"2-digit",minute:"2-digit"})}`
+    : ses.closedToday && ses.closedToday!=="weekend"
+      ? `dziś zamknięte — <b>${ses.closedToday}</b> · otwarcie ${when}`
+      : `otwarcie ${when} czasu lokalnego`;
+}
+setInterval(tick,1000); tick();
+
+// ---------- wykres zmiennosci ----------
+function chart(history, horizons){
+  if(!history.length) return "";
+  const W=680,H=250,P={t:16,r:70,b:24,l:44};
+  const vols=history.map(h=>h.vol);
+  const projPts=Object.keys(horizons).map(Number).sort((a,b)=>a-b)
+    .map(h=>({day:h, vol:horizons[String(h)].predicted_vol}));
+  const all=[...vols,...projPts.map(p=>p.vol)];
+  const lo=Math.max(0,Math.min(...all)*0.85), hi=Math.max(...all)*1.12;
+  const maxDay=projPts.length?Math.max(...projPts.map(p=>p.day)):0;
+  const total=history.length+maxDay;
+  const x=i=>P.l+(W-P.l-P.r)*(i/Math.max(total-1,1));
+  const y=v=>P.t+(H-P.t-P.b)*(1-(v-lo)/Math.max(hi-lo,1e-6));
+
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Zmienność i prognoza">`;
+  // siatka pozioma
+  const ticks=4;
+  for(let i=0;i<=ticks;i++){
+    const v=lo+(hi-lo)*i/ticks, yy=y(v);
+    s+=`<line x1="${P.l}" y1="${yy}" x2="${W-P.r}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`;
+    s+=`<text x="${P.l-7}" y="${yy+3.5}" font-size="10" fill="var(--dimmer)" text-anchor="end">${v.toFixed(0)}%</text>`;
   }
-  return { state: "unknown", until: null, label: "do otwarcia sesji", note: null };
-}
-
-let session = sessionState();
-function tick() {
-  if (!session.until || session.until <= new Date()) session = sessionState();
-  const el = $("countdown");
-  if (!session.until) { el.textContent = "—"; return; }
-  let s = Math.max(0, Math.floor((session.until - new Date()) / 1000));
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-  el.textContent = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-  el.className = "countdown" + (session.state === "open" ? " up" : "");
-  const opens = session.until.toLocaleString("pl-PL", { weekday: "short", hour: "2-digit", minute: "2-digit" });
-  $("openInfo").innerHTML = session.state === "open"
-    ? `<b>sesja trwa</b> — zamknięcie ${session.until.toLocaleString("pl-PL", { hour: "2-digit", minute: "2-digit" })} czasu lokalnego`
-    : session.closedToday && session.closedToday !== "weekend"
-      ? `dziś giełda zamknięta — <b>${session.closedToday}</b> · otwarcie ${opens}`
-      : `${session.label} · ${opens} czasu lokalnego`;
-  const hdr = document.querySelector("#countdown").closest(".card").querySelector("h2");
-  if (hdr) hdr.textContent = session.state === "open" ? "Do zamknięcia sesji" : "Do otwarcia sesji";
-}
-setInterval(tick, 1000); tick();
-
-// ---------- dopasowanie strategii do dzisiejszego stanu rynku ----------
-function matches(features, conditions) {
-  if (!Array.isArray(conditions) || !conditions.length) return false;
-  return conditions.every(c => {
-    const v = features[c.feature];
-    if (v === undefined || v === null || !isFinite(v)) return false;
-    return c.op === "<" ? v < c.threshold : v > c.threshold;
+  // historia
+  const path=history.map((h,i)=>`${i?"L":"M"}${x(i)},${y(h.vol)}`).join(" ");
+  s+=`<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="1.8"/>`;
+  // etykiety dat
+  [0,Math.floor(history.length/2),history.length-1].forEach(i=>{
+    if(history[i]) s+=`<text x="${x(i)}" y="${H-6}" font-size="9.5" fill="var(--dimmer)" text-anchor="middle">${history[i].date.slice(5)}</text>`;
   });
+  // prognoza
+  const lastI=history.length-1, lastV=history[lastI].vol;
+  let px=x(lastI), py=y(lastV);
+  projPts.forEach(p=>{
+    const nx=x(lastI+p.day), ny=y(p.vol);
+    const col=p.vol>lastV?"var(--hot)":"var(--calm)";
+    s+=`<line x1="${px}" y1="${py}" x2="${nx}" y2="${ny}" stroke="${col}" stroke-width="1.7" stroke-dasharray="4 3"/>`;
+    s+=`<circle cx="${nx}" cy="${ny}" r="3.2" fill="${col}"/>`;
+    px=nx; py=ny;
+  });
+  const lastP=projPts[projPts.length-1];
+  if(lastP){
+    s+=`<text x="${px+7}" y="${py+4}" font-size="11" font-weight="600" fill="${lastP.vol>lastV?"var(--hot)":"var(--calm)"}">${lastP.vol.toFixed(1)}%</text>`;
+    s+=`<text x="${px+7}" y="${py+17}" font-size="9.5" fill="var(--dimmer)">za ${lastP.day} sesji</text>`;
+  }
+  s+=`</svg>`;
+  return s;
 }
 
-// ---------- wykres ----------
-function chart(sessions, projections) {
-  // projections: [{day, move}] — kolejne horyzonty, moga byc puste
-  if (!sessions.length) return "";
-  const W = 640, H = 240, P = { t: 14, r: 62, b: 22, l: 8 };
-  const closes = sessions.map(s => s.close);
-  const last = closes[closes.length - 1];
-  const pts = (projections || []).filter(p => p && isFinite(p.move))
-    .map(p => ({ day: p.day, price: last * (1 + p.move / 100), move: p.move }));
-  const projPrices = pts.map(p => p.price);
-  const lo = Math.min(...sessions.map(s => s.low), ...projPrices, last);
-  const hi = Math.max(...sessions.map(s => s.high), ...projPrices, last);
-  const pad = (hi - lo) * 0.12 || 1;
-  const y = v => P.t + (H - P.t - P.b) * (1 - (v - lo + pad) / (hi - lo + 2 * pad));
-  const maxDay = pts.length ? Math.max(...pts.map(p => p.day)) : 0;
-  const step = (W - P.l - P.r) / (sessions.length + Math.min(maxDay, 3) + 0.6);
-  const x = i => P.l + step * (i + 0.5);
+const regimeClass = r =>
+  /panik|nerwow/.test(r||"") ? "hot" : /spokoj/.test(r||"") ? "calm" : "mid";
 
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Ostatnie sesje i projekcja">`;
-  // swiece
-  sessions.forEach((s, i) => {
-    const up = s.close >= s.open;
-    const col = up ? "var(--up)" : "var(--down)";
-    const bw = Math.min(step * 0.55, 16);
-    const yo = y(s.open), yc = y(s.close);
-    svg += `<line x1="${x(i)}" y1="${y(s.high)}" x2="${x(i)}" y2="${y(s.low)}" stroke="${col}" stroke-width="1.2"/>`;
-    svg += `<rect x="${x(i) - bw / 2}" y="${Math.min(yo, yc)}" width="${bw}" height="${Math.max(Math.abs(yc - yo), 1.5)}" fill="${col}"/>`;
-    if (i % 3 === 0 || i === sessions.length - 1) {
-      svg += `<text x="${x(i)}" y="${H - 6}" font-size="9" fill="var(--dimmer)" text-anchor="middle">${s.date.slice(5)}</text>`;
-    }
-  });
-  // projekcje — osobny punkt na kazdy horyzont
-  const lastX = x(sessions.length - 1), lastY = y(last);
-  let prevX = lastX, prevY = lastY;
-  pts.filter(p => p.day <= 3).sort((a, b) => a.day - b.day).forEach(p => {
-    const px = x(sessions.length - 1 + p.day), py = y(p.price);
-    const col = p.move >= 0 ? "var(--up)" : "var(--down)";
-    svg += `<line x1="${prevX}" y1="${prevY}" x2="${px}" y2="${py}" stroke="${col}" stroke-width="1.6" stroke-dasharray="4 3"/>`;
-    svg += `<circle cx="${px}" cy="${py}" r="3.2" fill="${col}"/>`;
-    svg += `<text x="${px + 6}" y="${py + 3.5}" font-size="10" fill="${col}" font-weight="600">${p.day}D ${p.price.toFixed(0)}</text>`;
-    prevX = px; prevY = py;
-  });
-  svg += `</svg>`;
-  return svg;
+async function main(){
+  if(!CFG || CFG.firebase.apiKey==="WKLEJ_TUTAJ"){
+    alertBox("<b>Brak konfiguracji Firebase.</b> Uzupełnij <code>config.js</code>."); return;
+  }
+  const db=getFirestore(initializeApp(CFG.firebase));
+  const snap=await getDoc(doc(db,"vol_predictions","latest"));
+  if(!snap.exists()){
+    alertBox("<b>Brak prognozy.</b> Uruchom <code>ia3 zmiennosc</code> na Macu."); return;
+  }
+  const D=snap.data();
+  const H=D.horizons||{};
+  $("stamp").innerHTML=`ostatnia sesja ${D.date} · zamknięcie ${fmt(D.close_price)}`;
+
+  // glowna karta: horyzont 5 sesji, bo to najbardziej praktyczny okres
+  const main5=H["5"]||H["10"]||H[Object.keys(H)[0]];
+  if(main5){
+    const cls=main5.predicted_vol>main5.current_vol?"hot":"calm";
+    $("mainVol").className="big "+cls;
+    $("mainVol").textContent=fmt(main5.predicted_vol,1)+"%";
+    $("mainDetail").innerHTML=`teraz <b>${fmt(main5.current_vol,1)}%</b> · `
+      +`zmiana <b>${pct(main5.change_pct,0)}</b> · typowy ruch dnia <b>${fmt(main5.daily_move)}%</b>`;
+    $("regime").className="mid "+regimeClass(main5.regime);
+    $("regime").textContent=main5.regime||"—";
+    $("regimeDetail").textContent=main5.percentile!=null
+      ? `${Math.round(main5.percentile*100)}. percentyl ostatniego roku` : "";
+  }
+
+  // tabela horyzontow
+  const tb=$("horizons").querySelector("tbody");
+  const keys=Object.keys(H).map(Number).sort((a,b)=>a-b);
+  tb.innerHTML = keys.length ? keys.map(h=>{
+    const e=H[String(h)];
+    const up=e.predicted_vol>e.current_vol;
+    return `<tr>
+      <td><b>${h} ${h===1?"sesja":h<5?"sesje":"sesji"}</b></td>
+      <td>${fmt(e.current_vol,1)}%</td>
+      <td class="${up?"hot":"calm"}"><b>${fmt(e.predicted_vol,1)}%</b></td>
+      <td class="${up?"hot":"calm"}">${pct(e.change_pct,0)}</td>
+      <td>${fmt(e.daily_move)}%</td>
+      <td>${fmt(e.suggested_stop)}%</td>
+      <td><span class="pill ${regimeClass(e.regime)}">${e.regime}</span></td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="7" class="note">Brak prognozy.</td></tr>`;
+
+  // wykres
+  $("chart").innerHTML=chart(D.history||[],H);
+  $("chartNote").innerHTML="Linia ciągła to zmienność zrealizowana z ostatnich 22 sesji, "
+    +"liczona na bieżąco. Punkty przerywane to prognoza modelu na kolejne horyzonty.";
+
+  // praktyczne wnioski
+  if(main5){
+    const up=(main5.change_pct||0)>5, down=(main5.change_pct||0)<-5;
+    const calm=/spokoj/.test(main5.regime||"");
+    let html=`<div class="row"><span class="k">Typowy ruch dnia</span>`
+      +`<span class="v">±${fmt(main5.daily_move)}%</span></div>`
+      +`<div class="row"><span class="k">Stop poniżej szumu</span>`
+      +`<span class="v">${fmt(main5.suggested_stop)}%</span></div>`
+      +`<div class="row"><span class="k">W punktach indeksu</span>`
+      +`<span class="v">±${fmt(D.close_price*main5.daily_move/100,0)} pkt</span></div>`;
+    html+=`<div class="note" style="margin-top:12px;color:var(--text);font-size:13px">`;
+    if(up) html+="Model spodziewa się <b>wzrostu zmienności</b>. To moment na "
+      +"zmniejszenie pozycji i szersze stopy, zanim rynek wymusi to sam.";
+    else if(down) html+="Model spodziewa się <b>uspokojenia</b>. Stopy mogą być ciaśniejsze, "
+      +"ale pamiętaj, że spokój bywa przerywany nagle.";
+    else html+="Model nie widzi istotnej zmiany reżimu. Parametry ryzyka bez zmian.";
+    if(calm) html+=" <br><br>Rynek jest w dolnej części rocznego rozkładu zmienności — "
+      +"historycznie takie okresy kończą się gwałtowniej, niż się zaczynają.";
+    html+=`</div>`;
+    $("practical").innerHTML=html;
+  }
+
+  // skutecznosc
+  const sb=D.scoreboard;
+  if(sb && sb.n){
+    $("score").innerHTML=`Rozliczonych prognoz: <b>${sb.n}</b>, korelacja `
+      +`<b>${fmt(sb.corr,3)}</b>, średni błąd względny <b>${fmt(sb.mape,1)}%</b>.`;
+  } else {
+    $("score").innerHTML="Brak rozliczonych prognoz — pierwsze pojawią się po kilku sesjach. "
+      +"<b>To jedyna miara liczona na danych, których model nie widział</b>, "
+      +"gdy stawiał tezę.";
+  }
+
+  const M=D.model||{};
+  $("footer").innerHTML=
+    `Model: <b>${M.name||"—"}</b>. W walidacji kroczącej (${M.period||"—"}) osiągnął `
+    +`korelację <b>${M.walkforward_corr??"—"}</b> i R² <b>${M.walkforward_r2??"—"}</b>, `
+    +`bijąc ${M.beats||"modele odniesienia"}.<br>`
+    +`Prognoza dotyczy <b>wielkości ruchu, nie kierunku</b>. Kierunek indeksu na dziennych `
+    +`świecach nie przeszedł walidacji (korelacja 0,04) i został z systemu usunięty.<br>`
+    +`Wszystkie liczby to statystyki, nie rekomendacje inwestycyjne.`;
 }
 
-// ---------- glowna logika ----------
-async function main() {
-  if (!CFG || CFG.firebase.apiKey === "WKLEJ_TUTAJ") {
-    alertBox("<b>Brak konfiguracji Firebase.</b> Uzupełnij <code>config.js</code> — instrukcja w komentarzu w tym pliku.");
-    return;
-  }
-  const db = getFirestore(initializeApp(CFG.firebase));
-
-  const snapDoc = await getDoc(doc(db, "daily_snapshot", "latest"));
-  if (!snapDoc.exists()) {
-    alertBox("<b>Brak migawki na dziś.</b> Uruchom <code>python3 ia3.py snapshot</code>.");
-    return;
-  }
-  const snap = snapDoc.data();
-  const features = snap.features || {};
-
-  const stampNote = session.state === "open"
-    ? " · <b>predykcja dotyczy trwającej sesji</b>"
-    : session.state === "before" ? " · predykcja na najbliższą sesję" : "";
-  $("dataStamp").innerHTML = `ostatnia zamknięta sesja ${snap.date} · zamknięcie ${fmt(snap.last_close)}${stampNote}`;
-
-  // Gotowa predykcja policzona przez silnik. Panel jej nie przelicza —
-  // ta sama logika w dwoch jezykach predzej czy pozniej by sie rozjechala,
-  // a przy okazji nie bylo zapisu tego, co system twierdzil danego dnia.
-  const predDoc = await getDoc(doc(db, "predictions", "latest"));
-  const ready = predDoc.exists() && predDoc.data().date === snap.date
-    ? predDoc.data() : null;
-  if (predDoc.exists() && !ready) {
-    alertBox(`Predykcja w bazie jest z <b>${predDoc.data().date}</b>, a dane z <b>${snap.date}</b>. `
-      + `Uruchom <code>python3 ia3.py predict</code>, żeby ją odświeżyć — poniżej liczę doraźnie.`);
-  } else if (!predDoc.exists()) {
-    alertBox(`Brak zapisanej predykcji — liczę doraźnie w przeglądarce. `
-      + `Uruchom <code>python3 ia3.py predict</code>, żeby zapisywać je do logu i mierzyć skuteczność.`);
-  }
-
-  const qs = await getDocs(query(
-    collection(db, "strategies"),
-    where("rating", ">=", CFG.minRating),
-    orderBy("rating", "desc"),
-    limit(CFG.strategyLimit)
-  ));
-  const all = qs.docs.map(d => d.data());
-  if (!all.length) {
-    alertBox("<b>Brak strategii w bazie.</b> Uruchom silnik i wypchnij wyniki: <code>python3 ia3.py push</code>.");
-    return;
-  }
-
-  // ktore maja dzis zastosowanie
-  const matched = all.filter(s => matches(features, s.definition?.conditions || []));
-
-  const wsum = arr => arr.reduce((a, s) => a + (s.rating || 0) / 100, 0);
-
-  // Predykcje liczymy OSOBNO dla kazdego horyzontu. Przewaga strategii
-  // dziesieciodniowej opisuje ruch w ciagu dziesieciu sesji, jednodniowej —
-  // w ciagu jednej. Usrednienie ich w jedna liczbe nie ma sensu wymiarowego
-  // i zawyzalo predykcje na najblizsza sesje.
-  function predictFor(set) {
-    const longs = set.filter(s => (s.edge_mean || 0) > 0);
-    const shorts = set.filter(s => (s.edge_mean || 0) < 0);
-    const wL = wsum(longs), wS = wsum(shorts), wA = wL + wS;
-    const move = wA > 0
-      ? set.reduce((a, s) => a + (s.edge_mean || 0) * (s.rating || 0) / 100, 0) / wA
-      : 0;
-    return {
-      set, longs: longs.length, shorts: shorts.length,
-      wLong: wL, wShort: wS, wAll: wA, move,
-      agreement: wA > 0 ? Math.abs(wL - wS) / wA : 0,
-      avgRating: set.length ? set.reduce((a, s) => a + (s.rating || 0), 0) / set.length : 0,
-    };
-  }
-
-  const HORIZONS = [1, 2, 3, 5, 10];
-  const byHorizon = {};
-  HORIZONS.forEach(h => {
-    const set = matched.filter(s => s.horizon === h);
-    if (!set.length) return;
-    const local = predictFor(set);
-    const server = ready?.horizons?.[String(h)];
-    // Gotowa predykcja z silnika ma wlasciwa liczbe: `expected_move` to
-    // prognoza ruchu ceny (sredni zwrot po sygnale), a nie sama przewaga
-    // nad baseline, ktora panel liczyl wczesniej.
-    byHorizon[h] = server
-      ? { ...local, move: server.expected_move, edge: server.edge_mean,
-          confidence: server.confidence, fromEngine: true }
-      : { ...local, edge: local.move, fromEngine: false };
-  });
-
-  // naglowek opisuje NAJBLIZSZA SESJE — czyli wylacznie strategie jednodniowe
-  const near = byHorizon[1] || predictFor([]);
-  const overall = predictFor(matched);   // tylko do rozkladu long/short i pewnosci
-
-  const longs = matched.filter(s => (s.edge_mean || 0) > 0);
-  const shorts = matched.filter(s => (s.edge_mean || 0) < 0);
-  const wLong = overall.wLong, wShort = overall.wShort, wAll = overall.wAll;
-  const expectedMove = near.move;
-  const agreement = overall.agreement;
-  const avgRating = matched.length ? matched.reduce((a, s) => a + (s.rating || 0), 0) / matched.length : 0;
-  const volp = snap.vol_percentile;
-
-  // Pewnosc: zgodnosc kierunku x liczba strategii x ich jakosc x rezim zmiennosci.
-  // Ostatni czynnik jest tu nieprzypadkowo — badania na danych 2000-2026 pokazaly,
-  // ze przewaga sygnalow kontrarianskich rosnie monotonicznie ze zmiennoscia rynku:
-  // 0.09% przy spokoju wobec 0.54% przy panice. W spokojnym rynku system powinien
-  // deklarowac nizsza pewnosc, nawet gdy strategie sa zgodne.
-  const countFactor = Math.min((near.set.length || matched.length) / 8, 1);
-  const ratingFactor = Math.min(avgRating / 85, 1);
-  const volFactor = volp === null || volp === undefined ? 0.7 : 0.55 + 0.45 * volp;
-  const confidence = byHorizon[1]?.confidence !== undefined
-    ? Math.round(byHorizon[1].confidence)
-    : Math.round(agreement * countFactor * ratingFactor * volFactor * 100);
-
-  // --- naglowek predykcji ---
-  const noNear = near.set.length === 0;
-  const dirLabel = matched.length === 0 ? "BRAK SYGNAŁU"
-    : noNear ? "—"
-    : expectedMove > 0.02 ? "W GÓRĘ" : expectedMove < -0.02 ? "W DÓŁ" : "NEUTRALNIE";
-  const dirClass = matched.length === 0 || noNear ? "flat"
-    : expectedMove > 0.02 ? "up" : expectedMove < -0.02 ? "down" : "flat";
-  $("predDir").className = "big " + dirClass;
-  $("predDir").textContent = dirLabel;
-  $("predDetail").innerHTML = matched.length === 0
-    ? "żadna strategia nie ma dziś zastosowania — warunki nie są spełnione"
-    : near.set.length === 0
-      ? `brak strategii jednodniowych — patrz tabela horyzontów niżej`
-      : `oczekiwany ruch <b>${pct(expectedMove)}</b> · pewność <b>${confidence}%</b> `
-        + `<span class="note">(${near.set.length} ${near.set.length === 1 ? "strategia" : "strategii"} o horyzoncie 1 dnia)</span>`;
-
-  const engineMatched = ready?.n_strategies_matched;
-  const engineConsidered = ready?.n_strategies_considered;
-  $("matchCount").textContent = engineMatched !== undefined ? engineMatched : matched.length;
-  $("matchDetail").textContent = engineConsidered !== undefined
-    ? `sprawdzono ${engineConsidered.toLocaleString("pl-PL")} strategii-kandydatów`
-    : `z ${all.length} strategii w bazie (rating ≥ ${CFG.minRating})`;
-
-  // --- rozklad ---
-  const pL = wAll > 0 ? wLong / wAll * 100 : 0;
-  $("dirBar").innerHTML = wAll > 0
-    ? `<i style="width:${pL}%;background:var(--up)"></i><i style="width:${100 - pL}%;background:var(--down)"></i>`
-    : `<i style="width:100%;background:var(--panel2)"></i>`;
-  $("longStat").innerHTML = `<span class="pill long">${longs.length}</span>`;
-  $("shortStat").innerHTML = `<span class="pill short">${shorts.length}</span>`;
-  $("weightStat").textContent = `${fmt(wLong)} / ${fmt(wShort)}`;
-  $("avgRating").textContent = matched.length ? fmt(avgRating, 1) : "—";
-  $("agreeStat").textContent = matched.length ? Math.round(agreement * 100) + "%" : "—";
-  $("volStat").textContent = volp === null || volp === undefined ? "—"
-    : `${(volp * 100).toFixed(0)} percentyl ${volp > 0.7 ? "· nerwowo" : volp < 0.3 ? "· spokojnie" : ""}`;
-
-  // --- tabela horyzontow ---
-  const htb = $("horizonTable").querySelector("tbody");
-  const hRows = HORIZONS.filter(h => byHorizon[h]);
-  if (!hRows.length) {
-    htb.innerHTML = `<tr><td colspan="8" class="note">Brak strategii z zastosowaniem dziś.</td></tr>`;
-  } else {
-    htb.innerHTML = hRows.map(h => {
-      const p = byHorizon[h];
-      const up = p.move > 0.02, down = p.move < -0.02;
-      const cls = up ? "up" : down ? "down" : "flat";
-      const label = up ? "wzrost" : down ? "spadek" : "neutralnie";
-      const target = snap.last_close * (1 + p.move / 100);
-      return `<tr>
-        <td><b>${h}D</b></td>
-        <td class="${cls}">${label}</td>
-        <td class="${cls}">${pct(p.move)}</td>
-        <td class="note">${pct(p.edge ?? p.move)}</td>
-        <td>${fmt(target)}</td>
-        <td>${p.set.length}</td>
-        <td><span class="pill long">${p.longs}</span> <span class="pill short">${p.shorts}</span></td>
-        <td>${Math.round(p.agreement * 100)}%</td>
-      </tr>`;
-    }).join("");
-  }
-
-  // --- wykres ---
-  const sessions = snap.recent_sessions || [];
-  const projections = HORIZONS.filter(h => byHorizon[h] && h <= 3)
-    .map(h => ({ day: h, move: byHorizon[h].move }));
-  $("chart").innerHTML = chart(sessions, projections);
-  $("chartNote").textContent = projections.length
-    ? `Punkty przerywane to projekcje na 1, 2 i 3 sesje — każda liczona wyłącznie ze strategii o tym horyzoncie.`
-    : matched.length
-      ? "Strategie z zastosowaniem dziś mają horyzonty dłuższe niż 3 dni — patrz tabela wyżej."
-      : "Brak projekcji — dziś żadna strategia nie ma zastosowania.";
-
-  // --- poziomy ---
-  const close = snap.last_close, atrPct = snap.atr_14_pct;
-  const atrAbs = atrPct ? close * atrPct / 100 : null;
-  $("lvlClose").textContent = fmt(close);
-  $("lvlEntry").textContent = "≈ " + fmt(close) + " (otwarcie)";
-  $("lvlTarget").textContent = near.set.length ? fmt(close * (1 + expectedMove / 100)) + " (1D)" : "—";
-  $("lvlStop").textContent = atrAbs && matched.length
-    ? fmt(close + (expectedMove >= 0 ? -2 : 2) * atrAbs) : "—";
-  $("lvlAtr").textContent = atrPct ? `${fmt(atrPct)}% (${fmt(atrAbs)} pkt)` : "—";
-
-  // --- wnioski ---
-  let concl;
-  if (matched.length === 0) {
-    concl = "<b>Dziś nie ma na czym grać.</b> Żadna ze strategii w bazie nie ma spełnionych warunków — to normalne i zdarza się często. System nie zgaduje, kiedy nie ma podstaw.";
-  } else {
-    const side = expectedMove > 0 ? "długiej" : "krótkiej";
-    const strength = confidence >= 55 ? "wyraźny" : confidence >= 30 ? "umiarkowany" : "słaby";
-    const hs = hRows.map(h => `${h}D ${pct(byHorizon[h].move)}`).join(" · ");
-    concl = `Sygnał <b>${strength}</b> po stronie <b>${side}</b>: ${matched.length} `
-      + `${matched.length === 1 ? "strategia ma" : "strategii ma"} dziś zastosowanie, `
-      + `${longs.length} wskazuje wzrost, ${shorts.length} spadek, zgodność ${Math.round(agreement * 100)}%.`
-      + `<br><br>Oczekiwana zmiana według horyzontu: <b>${hs}</b>.`;
-    if (volp !== null && volp !== undefined && volp < 0.3) {
-      concl += ` <br><br>Uwaga: rynek jest spokojny (${(volp * 100).toFixed(0)} percentyl zmienności). `
-        + `Sygnały kontrariańskie zarabiają głównie na panice — w takich warunkach ich historyczna przewaga spada kilkukrotnie, `
-        + `dlatego pewność jest tu obniżona mimo zgodności strategii.`;
-    }
-    if (shorts.length > 0) {
-      concl += ` <br><br>Strona krótka wypadła słabo w testach z ostatnich dwóch lat — traktuj sygnały spadkowe raczej jako powód do wstrzymania się niż do gry na spadek.`;
-    }
-  }
-  $("conclusion").innerHTML = concl;
-
-  // --- tabela ---
-  // Lista pochodzi z predykcji policzonej przez silnik, bo on sprawdza
-  // WSZYSTKIE strategie-kandydatow, a panel widzi w Firestore tylko top 100
-  // wg ratingu — a te prawie nigdy nie sa tymi, ktore dzis pasuja.
-  const fromEngine = [];
-  if (ready?.horizons) {
-    const seenDesc = new Set();
-    Object.keys(ready.horizons).sort((a, b) => a - b).forEach(h => {
-      (ready.horizons[h].strategies || []).forEach(s => {
-        const key = s.description + "|" + h;
-        if (seenDesc.has(key)) return;
-        seenDesc.add(key);
-        fromEngine.push({ ...s, horizon: Number(h) });
-      });
-    });
-  }
-
-  const tb = $("matchTable").querySelector("tbody");
-  if (fromEngine.length) {
-    tb.innerHTML = fromEngine
-      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
-      .slice(0, 60)
-      .map(s => {
-        const isLong = s.direction === "long";
-        return `<tr>
-          <td><span class="pill ${isLong ? "long" : "short"}">${isLong ? "LONG" : "SHORT"}</span></td>
-          <td>${fmt(s.rating, 1)}</td>
-          <td class="${isLong ? "up" : "down"}">${pct(s.edge_mean)}</td>
-          <td>${fmt(s.hit_rate, 1)}%</td>
-          <td>${s.horizon}d</td>
-          <td>${s.n_episodes ?? "—"}</td>
-          <td class="desc">${s.description || ""}</td>
-        </tr>`;
-      }).join("");
-  } else if (!matched.length) {
-    tb.innerHTML = `<tr><td colspan="7" class="note">Dziś żadna strategia nie ma spełnionych warunków.</td></tr>`;
-  } else {
-    tb.innerHTML = matched.slice(0, 40).map(s => {
-      const isLong = (s.edge_mean || 0) > 0;
-      const conds = (s.definition?.conditions || [])
-        .map(c => `${c.feature} ${c.op} ${c.threshold}`).join(" ORAZ ");
-      return `<tr>
-        <td><span class="pill ${isLong ? "long" : "short"}">${isLong ? "LONG" : "SHORT"}</span></td>
-        <td>${fmt(s.rating, 1)}</td>
-        <td class="${isLong ? "up" : "down"}">${pct(s.edge_mean)}</td>
-        <td>${fmt(s.hit_rate, 1)}%</td>
-        <td>${s.horizon}d</td>
-        <td>${s.n_episodes ?? "—"}</td>
-        <td class="desc">${conds}</td>
-      </tr>`;
-    }).join("");
-  }
-
-  // --- skutecznosc dotychczasowych predykcji ---
-  const sbDoc = await getDoc(doc(db, "predictions", "scoreboard"));
-  const sb = sbDoc.exists() ? sbDoc.data() : null;
-  if (!sb || !sb.n_settled) {
-    $("scoreboard").innerHTML =
-      "Brak rozliczonych predykcji. To normalne na początku — pierwsze wyniki pojawią się "
-      + "po kilku sesjach, a sensowne wnioski dopiero po jakichś stu. "
-      + "<b>To jedyny naprawdę uczciwy test tego systemu</b>: wszystko inne mierzone jest "
-      + "na danych, które silnik już widział.";
-  } else {
-    const rows = Object.entries(sb.by_horizon || {}).map(([h, v]) => `
-      <tr><td><b>${h}D</b></td><td>${v.n}</td>
-      <td>${v.accuracy !== null ? v.accuracy.toFixed(1) + "%" : "—"}</td>
-      <td>${pct(v.predicted_mean)}</td><td>${pct(v.actual_mean)}</td>
-      <td>${fmt(v.mean_abs_error, 3)} pp</td></tr>`).join("");
-    $("scoreboard").innerHTML = `
-      <div class="scroll"><table>
-        <thead><tr><th>horyzont</th><th>predykcji</th><th>trafność kierunku</th>
-        <th>prognozowano</th><th>faktycznie</th><th>błąd</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-      <div style="margin-top:9px">Łącznie ${sb.n_settled} rozliczonych predykcji, trafność kierunku
-      <b>${sb.overall_accuracy !== null ? sb.overall_accuracy.toFixed(1) + "%" : "—"}</b>.
-      ${sb.n_settled < 100 ? "Przy tej liczbie wynik jest jeszcze bardzo niestabilny." : ""}</div>`;
-  }
-
-  // --- stopka ---
-  const metaDoc = await getDoc(doc(db, "engine_meta", "latest"));
-  const meta = metaDoc.exists() ? metaDoc.data() : {};
-  const tested = meta.total_hypotheses_tested;
-  const thr = tested ? Math.sqrt(2 * Math.log(tested)) : null;
-  $("footer").innerHTML =
-    `Silnik sprawdził <b>${tested ? tested.toLocaleString("pl-PL") : "—"}</b> hipotez. `
-    + `Próg istotności po korekcie na tę liczbę prób: <b>|t| &gt; ${thr ? thr.toFixed(2) : "—"}</b>. `
-    + `Dane od 2000 roku, ostatnie dwa lata trzymane poza procesem szukania jako skarbiec.<br>`
-    + `Wszystkie liczby to statystyki historyczne, nie prognozy ani rekomendacje inwestycyjne. `
-    + `Przewaga rzędu 0,2% na transakcję znika przy kosztach transakcyjnych powyżej tego poziomu.`;
-}
-
-main().catch(e => {
+main().catch(e=>{
   console.error(e);
-  const perm = /permission|insufficient/i.test(e.message || "");
+  const perm=/permission|insufficient/i.test(e.message||"");
   alertBox(perm
-    ? `<b>Firestore odmawia dostępu.</b> Reguły w konsoli Firebase są starsze niż te w repo — `
-      + `brakuje w nich zgody na odczyt kolekcji <code>strategies</code> i <code>predictions</code>.<br>`
-      + `<span class="note">Firebase Console → Firestore Database → Rules → wklej zawartość `
-      + `<code>firebase/firestore.rules</code> → Publish.</span>`
-    : `<b>Błąd wczytywania:</b> ${e.message}<br><span class="note">Sprawdź konfigurację w config.js.</span>`);
+    ? `<b>Firestore odmawia dostępu.</b> Wgraj aktualne reguły — brakuje zgody na `
+      +`odczyt kolekcji <code>vol_predictions</code>.<br><span class="note">Firebase Console → `
+      +`Firestore Database → Rules → wklej <code>firebase/firestore.rules</code> → Publish.</span>`
+    : `<b>Błąd wczytywania:</b> ${e.message}`);
 });
 </script>
 </body>

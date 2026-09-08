@@ -48,6 +48,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // prognozy zmiennosci
+    match /vol_predictions/{document=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // metadane silnika
     match /engine_meta/{document=**} {
       allow read: if true;

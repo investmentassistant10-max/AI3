@@ -15,6 +15,8 @@ IA3 — jeden punkt wejscia z terminala.
     python3 ia3.py predict                 policz predykcje, zapisz i wyslij
     python3 ia3.py score                   skutecznosc dotychczasowych predykcji
     python3 ia3.py calibrate               zmierz realny prog istotnosci
+    python3 ia3.py zmiennosc               prognoza zmiennosci na dzis
+    python3 ia3.py wynik-zmiennosci        skutecznosc prognoz zmiennosci
     python3 ia3.py pulse                   wyslij stan silnika do Firestore
 
 Komendy dzialaja tez po polsku:
@@ -32,7 +34,7 @@ STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
 
 # Ktora komenda czego naprawde potrzebuje. Raport czy kalibracja czytaja
 # wylacznie lokalna baze — nie ma powodu, zeby wymagaly biblioteki do chmury.
-NEEDS_FIREBASE = {"sync", "push", "snapshot", "predict", "pulse", "run"}
+NEEDS_FIREBASE = {"sync", "push", "snapshot", "predict", "pulse", "run", "volatility"}
 
 
 def _check_deps(command):
@@ -117,6 +119,21 @@ def cmd_score(args):
 def cmd_calibrate(args):
     import calibrate
     calibrate.run(args.runs, args.sample)
+
+
+def cmd_vol(args):
+    import predict_vol
+    predict_vol.settle(quiet=True)
+    pred = predict_vol.make_prediction()
+    if pred and not args.local:
+        predict_vol.push(pred)
+        print("\nWyslano do Firestore: vol_predictions/latest")
+
+
+def cmd_vol_score(args):
+    import predict_vol
+    predict_vol.settle(quiet=True)
+    predict_vol.score()
 
 
 def cmd_pulse(args):
@@ -254,6 +271,10 @@ ALIASES = {
     "licz": "forever",
     "silnik": "forever",
     "cykl": "run",
+    "zmiennosc": "volatility",
+    "zmienność": "volatility",
+    "wynik-zmiennosci": "volscore",
+    "wynik-zmienności": "volscore",
 }
 
 
@@ -298,6 +319,11 @@ def main():
     p = sub.add_parser("pulse", help="wyslij stan silnika do Firestore")
     p.add_argument("--local", action="store_true")
 
+    p = sub.add_parser("volatility", help="prognoza zmiennosci na dzis")
+    p.add_argument("--local", action="store_true")
+
+    sub.add_parser("volscore", help="skutecznosc prognoz zmiennosci")
+
     p = sub.add_parser("calibrate", help="zmierz realny prog istotnosci")
     p.add_argument("--runs", type=int, default=20)
     p.add_argument("--sample", type=int, default=6000)
@@ -322,7 +348,7 @@ def main():
      "validate": cmd_validate, "diag": cmd_diag, "push": cmd_push,
      "report": cmd_report, "run": cmd_run, "snapshot": cmd_snapshot,
      "predict": cmd_predict, "score": cmd_score, "calibrate": cmd_calibrate,
-     "pulse": cmd_pulse,
+     "pulse": cmd_pulse, "volatility": cmd_vol, "volscore": cmd_vol_score,
      "forever": cmd_forever}[args.command](args)
 
 

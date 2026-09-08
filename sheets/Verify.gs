@@ -109,7 +109,7 @@ function setupAllTriggers() {
   var daily = [
     { fn: 'dailyUpdate', hour: 8 },
     { fn: 'verifyMorningData', hour: 8, minute: 15 },
-    { fn: 'syncPredictionLog', hour: 23 }
+    { fn: 'syncVolatilityLog', hour: 23 }
   ];
   var hourly = ['hourlySync'];
   var names = daily.map(function (w) { return w.fn; }).concat(hourly);

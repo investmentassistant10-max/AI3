@@ -93,7 +93,31 @@ def make_prediction(quiet=False):
 
     conn = get_db()
     now = datetime.now(timezone.utc).isoformat()
-    out = {"date": date, "made_at": now, "horizons": {}}
+
+    # historia zmiennosci do wykresu — 60 ostatnich sesji
+    tail = df.iloc[-60:]
+    history = [
+        {"date": idx.strftime("%Y-%m-%d"),
+         "vol": round(float(row["rv_22"]), 2) if np.isfinite(row["rv_22"]) else None,
+         "close": round(float(row["close"]), 2)}
+        for idx, row in tail.iterrows()
+        if np.isfinite(row["rv_22"])
+    ]
+
+    out = {
+        "date": date,
+        "made_at": now,
+        "close_price": round(float(last["close"]), 2),
+        "history": history,
+        "horizons": {},
+        "model": {
+            "name": "HAR rozszerzony",
+            "walkforward_corr": 0.673,
+            "walkforward_r2": 0.449,
+            "beats": "HAR (0.632 / 0.395) i model naiwny (0.593 / 0.186)",
+            "period": "walidacja kroczaca 2015-2024",
+        },
+    }
 
     if not quiet:
         print(f"Prognoza zmiennosci na {date}:")
@@ -207,6 +231,28 @@ def score():
     print("korelacje 0.66 i sredni blad wzgledny okolo 52%.")
 
 
+def scoreboard_data():
+    """Skutecznosc dotychczasowych prognoz — do pokazania w panelu."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM vol_predictions WHERE settled_at IS NOT NULL").fetchall()
+    conn.close()
+    if len(rows) < 3:
+        return {"n": len(rows)}
+    p = np.array([r["predicted_vol"] for r in rows], dtype=float)
+    a = np.array([r["actual_vol"] for r in rows], dtype=float)
+    ok = np.isfinite(p) & np.isfinite(a) & (p > 0) & (a > 0)
+    if ok.sum() < 3:
+        return {"n": int(ok.sum())}
+    corr = float(np.corrcoef(np.log(p[ok]), np.log(a[ok]))[0, 1]) if ok.sum() > 3 else None
+    return {
+        "n": int(ok.sum()),
+        "corr": round(corr, 3) if corr is not None and np.isfinite(corr) else None,
+        "mape": round(float((np.abs(p[ok] - a[ok]) / a[ok]).mean() * 100), 1),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def push(prediction):
     import firebase_admin
     from firebase_admin import credentials, firestore
@@ -214,6 +260,8 @@ def push(prediction):
     if not firebase_admin._apps:
         firebase_admin.initialize_app(credentials.Certificate(str(KEY_PATH)))
     db = firestore.client()
+    prediction = dict(prediction)
+    prediction["scoreboard"] = scoreboard_data()
     db.collection("vol_predictions").document("latest").set(prediction)
     db.collection("vol_predictions").document(prediction["date"]).set(prediction)
 

@@ -301,3 +301,71 @@ Naprawa techniczna, zeby nie zalezalo to od niczyjej dyscypliny:
 Do odzyskania danych z uszkodzonej bazy sluzy `rescue_db.py`. Silnik sprawdza
 tez wolne miejsce (start i co dziesiaty cykl) i zatrzymuje sie swiadomie
 ponizej 3 GB.
+
+## Zwrot ku zmiennosci (2026-09-08)
+
+### Dlaczego kierunek zostal usuniety
+
+Walidacja kroczaca 2015-2024, 2508 predykcji, kazda postawiona wylacznie na
+danych sprzed roku, ktorego dotyczyla:
+
+| miara | wynik |
+|---|---|
+| trafnosc kierunku | 51.59% |
+| trywialne "zawsze wzrost" w tych samych dniach | 53.71% |
+| przewaga | **-2.11 pp** |
+| korelacja prognoza-rzeczywistosc | 0.042 |
+| lat z przewaga | 2 z 10 |
+
+Najostrzejszy dowod przyszedl z rozbicia po sile sygnalu: najmocniejsze
+prognozy mialy **zerowa** przewage, najslabsze +3.3 pp. Gdyby sygnal niosl
+informacje, zaleznosc bylaby odwrotna. Wielkosc prognozy byla szumem.
+
+To zgodne z tym, czego oczekuje literatura. Cala informacja zawarta w cenie
+i wolumenie indeksu jest obserwowana przez tysiace zespolow z lepszymi danymi.
+
+### Dlaczego zmiennosc dziala
+
+Ta sama metoda, te same dane, ten sam kod walidacji:
+
+| model | korelacja | R^2 | blad wzgledny |
+|---|---|---|---|
+| naiwny ("bedzie jak bylo") | 0.593 | 0.186 | 48.8% |
+| HAR (standard literatury) | 0.632 | 0.395 | 43.0% |
+| **nasz rozszerzony** | **0.673** | **0.449** | **37.2%** |
+
+Lepszy od HAR w 8 latach z 10. Model wyjasnia 45% wariancji przyszlej
+zmiennosci — wobec 0.2% dla kierunku.
+
+Zmiennosc jest przewidywalna, bo jej struktura wynika z mechaniki rynku:
+dopasowywania dzwigni, wezwan do uzupelnienia depozytow, wolniejszego
+przeplywu informacji. Nie znika od tego, ze wszyscy o niej wiedza — inaczej
+niz przewaga kierunkowa, ktora znika w momencie odkrycia.
+
+### Co niesie informacje ponad HAR
+
+Wspolczynniki przy cechach standaryzowanych, model na pelnej historii:
+
+```
+log_rv_5           +0.157   kaskada HAR: okno tygodniowe
+log_rv_22          +0.096   okno miesieczne
+log_rv_66          +0.081   okno kwartalne (poza klasycznym HAR)
+semivol_ratio      +0.079   asymetria: ile zmiennosci pochodzi ze spadkow
+parkinson_ratio    +0.060   ile mowi zakres dnia ponad same zamkniecia
+```
+
+Dwie cechy dolozone poza HAR — asymetria i zakres wewnatrzdzienny — trafily
+do pierwszej piatki. To potwierdza, ze efekt dzwigni i informacja z high-low
+sa realne, a nie ozdobne.
+
+### Co zostalo z poprzedniego systemu
+
+Silnik przeszukujacy przestrzen strategii **zostaje jako narzedzie badawcze**.
+Odpowiada na pytanie "czy ten wzorzec dziala" w kilka minut, z korekta na
+liczbe prob, testem placebo i walidacja kroczaca. To jest wartosc sama w sobie —
+wiekszosc amatorskich systemow nie ma zadnego z tych zabezpieczen i dlatego
+ich wlasciciele latami handluja na iluzjach.
+
+Panel, arkusze i automat pokazuja wylacznie zmiennosc. System, ktory
+wyswietla liczbe bez wartosci predykcyjnej, predzej czy pozniej zostanie na
+niej oparty.
