@@ -44,7 +44,14 @@ def has_magic(path):
 
 
 def open_ro(path):
-    return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    """Odczyt bez zapisu. Baza w trybie WAL potrzebuje przy otwarciu pliku -shm,
+    czego tryb ro zabrania — wtedy wracamy do zwyklego otwarcia."""
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn.execute("SELECT count(*) FROM sqlite_master")
+        return conn
+    except sqlite3.DatabaseError:
+        return sqlite3.connect(str(path), timeout=15.0)
 
 
 def check(path=DB):

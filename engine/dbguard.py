@@ -33,14 +33,19 @@ def has_magic(path):
 
 
 def quick_check(path):
-    """(ok, komunikat). Nie rzuca wyjatkow — wolno ja wolac przed startem."""
+    """(ok, komunikat). Nie rzuca wyjatkow — wolno ja wolac przed startem.
+
+    Otwieramy normalnie, a nie w trybie ro. Baza w trybie WAL potrzebuje przy
+    otwarciu pliku -shm; tryb ro zabrania go zalozyc, wiec zdrowa baza zglasza
+    wtedy "unable to open database file" i wyglada jak zepsuta.
+    """
     path = Path(path)
     if not path.exists():
         return True, "brak bazy (zostanie zalozona)"
     if not has_magic(path):
         return False, "zniszczony naglowek pliku — baza nie do otwarcia"
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10.0)
+        conn = sqlite3.connect(str(path), timeout=15.0)
         msgs = [r[0] for r in conn.execute("PRAGMA quick_check(5)")]
         conn.close()
         return (msgs == ["ok"]), ("ok" if msgs == ["ok"] else "; ".join(msgs[:3]))
