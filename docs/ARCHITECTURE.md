@@ -254,3 +254,37 @@ rzedu 16 z 20 bylby argumentem.
 Prawdziwy test pozostaje ten sam co wczesniej: log predykcji, gdzie kazdy
 kolejny dzien dokłada nowa, nigdy wczesniej niewidziana obserwacje — zamiast
 kolejny raz odpytywac te same 502 sesje.
+
+## Przeglad z 2026-09-08 — co bylo nie tak
+
+**Predykcja liczyla glosy, nie niezalezne sygnaly.**
+Pomiar na danych z 2026-09-04: 356 pasujacych strategii, ale srednia korelacja
+miedzy ich sygnalami 0.53, a efektywnie okolo 11 niezaleznych glosow.
+Najliczniejsza rodzina liczyla 26 wariantow jednej tezy (te same cechy, rozne
+progi). Predykcje wygrywal wiec ten pomysl, ktory mial w bazie najwiecej
+wariantow — a liczba wariantow zalezy od tego, jak gesto siatka progow akurat
+pokryla dana ceche, czyli od przypadku.
+
+Poprawka: strategie sa grupowane w **rodziny** o wspolnej sygnaturze (zestaw
+cech wraz z kierunkiem porownania). Kazda rodzina ma jeden glos, wazony
+jakoscia jej najlepszego czlonka, a nie suma czlonkow. Liczba rodzin — nie
+liczba strategii — wchodzi tez do pewnosci.
+
+Efekt na tych samych danych: zgodnosc kierunku spadla z 90.6% na 81.6% (1D)
+i z 72.8% na 63.1% (3D). Prognoza zmienila sie nieznacznie, ale przestala
+zalezec od tego, ile wariantow progu akurat przetrwalo w bazie.
+
+**Baza rosla bez ograniczen.**
+3.6 mln hipotez zajmowalo 1.54 GB, bo kazda — takze odrzucona jako zbyt rzadka
+czy zbyt czesta — miala pelny wiersz z definicja JSON, opisem i kompletem
+statystyk (~426 bajtow). Po odrzuconych potrzebujemy tylko odcisku palca
+(deduplikacja) i faktu wykonania proby (prog istotnosci): ~30 bajtow.
+
+Poprawka: tabela `tested` na odrzucone, `compact_db.py` do jednorazowego
+przeniesienia istniejacych. Pomiar: 1.54 GB -> ~0.20 GB, czyli 1.34 GB
+odzyskane. Deduplikacja i licznik prob dzialaja bez zmian, bo obie tabele sa
+liczone razem.
+
+**Uwaga techniczna.** Bazy SQLite nie wolno czytac przez zdalny mount, gdy
+silnik pisze — daje to blad "database disk image is malformed", ktory NIE
+oznacza uszkodzenia. Do odczytu podczas pracy silnika: tryb `mode=ro&immutable=1`.

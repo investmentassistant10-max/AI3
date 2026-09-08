@@ -38,6 +38,9 @@ from pathlib import Path
 
 import numpy as np
 
+from search import (get_db, save_batch, save_rejected, all_seen_ids,
+                    total_trials, CANDIDATE_THRESHOLD)
+
 ROOT = Path(__file__).resolve().parent.parent
 STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
 LOG_PATH = ROOT / "data" / "engine.log"
@@ -93,7 +96,7 @@ def log(msg, to_file=True):
 
 
 def db_stats(conn, correlation_factor=1.0):
-    total = conn.execute("SELECT COUNT(*) FROM strategies").fetchone()[0]
+    total = total_trials(conn)
     cand = conn.execute(
         "SELECT COUNT(*) FROM strategies WHERE status='candidate'"
     ).fetchone()[0]
@@ -135,9 +138,8 @@ def evaluate_batch(strategies, data, masks, conn, seen, n_prior, quiet=True,
     import fastcore
     from strategy import describe
     from rating import compute_rating
-    from search import save_batch, CANDIDATE_THRESHOLD, total_trials
 
-    rows, n_tested, n_kept = [], 0, 0
+    rows, rejected, n_tested, n_kept = [], [], 0, 0
     now = datetime.now(timezone.utc).isoformat()
 
     for strat in strategies:
@@ -211,12 +213,23 @@ def evaluate_batch(strategies, data, masks, conn, seen, n_prior, quiet=True,
                 "status": "candidate" if rating >= CANDIDATE_THRESHOLD else "weak",
             })
 
-        rows.append(row)
+        # Pelny wiersz tylko dla tego, co przeszlo sito. Odrzucone zajmuja
+        # ~30 bajtow zamiast 426 — przy milionach hipotez to roznica miedzy
+        # baza na 4 GB a na 300 MB.
+        if row["status"] in ("candidate", "stale"):
+            rows.append(row)
+        else:
+            rejected.append(row)
+
         if len(rows) >= 2000:
             save_batch(conn, rows)
             rows = []
+        if len(rejected) >= 5000:
+            save_rejected(conn, rejected)
+            rejected = []
 
     save_batch(conn, rows)
+    save_rejected(conn, rejected)
     return n_tested, n_kept
 
 
@@ -234,7 +247,6 @@ def revalidate(conn, data, masks, top=REVALIDATE_TOP):
     """
     import fastcore
     from rating import compute_rating, load_correlation_factor
-    from search import total_trials, CANDIDATE_THRESHOLD
 
     rows = conn.execute(
         """SELECT id, definition, horizon FROM strategies
@@ -311,7 +323,6 @@ def main():
     from evaluate import split_search_treasury
     from strategy import (generate_level1, generate_level2, generate_level3,
                           SIGNAL_CONDITIONS, CONTEXT_CONDITIONS)
-    from search import get_db
     from mutate import evolve
     import fastcore
 
@@ -338,7 +349,7 @@ def main():
     conn = get_db()   # get_db samo dokłada brakujace kolumny
     from rating import load_correlation_factor
     corr = load_correlation_factor(conn)
-    seen = {r[0] for r in conn.execute("SELECT id FROM strategies")}
+    seen = all_seen_ids(conn)
     log(f"W bazie juz: {len(seen):,} sprawdzonych hipotez")
     s = db_stats(conn, corr)
     if corr > 1.01:

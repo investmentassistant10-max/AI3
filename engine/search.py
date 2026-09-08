@@ -62,6 +62,15 @@ CREATE TABLE IF NOT EXISTS strategies (
 CREATE INDEX IF NOT EXISTS idx_rating ON strategies(rating DESC);
 CREATE INDEX IF NOT EXISTS idx_status ON strategies(status);
 
+-- Odrzucone hipotezy trafiaja tutaj zamiast do `strategies`. Po nich
+-- potrzebujemy tylko dwoch rzeczy: odcisku palca (zeby nie sprawdzac drugi
+-- raz) i tego, ze proba zostala wykonana (do progu istotnosci). Pelny wiersz
+-- w `strategies` kosztuje ~426 bajtow, ten ~30.
+CREATE TABLE IF NOT EXISTS tested (
+    id     TEXT PRIMARY KEY,
+    status TEXT
+);
+
 CREATE TABLE IF NOT EXISTS search_runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at   TEXT,
@@ -85,11 +94,33 @@ def total_trials(conn):
     poprzeczke dla wszystkiego pozostalego.
     """
     n = conn.execute("SELECT COUNT(*) FROM strategies").fetchone()[0]
+    for table in ("tested", "exit_rules"):
+        try:
+            n += conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        except sqlite3.OperationalError:
+            pass
+    return n
+
+
+def all_seen_ids(conn):
+    """Odciski palca wszystkich sprawdzonych hipotez — z obu tabel."""
+    seen = {r[0] for r in conn.execute("SELECT id FROM strategies")}
     try:
-        n += conn.execute("SELECT COUNT(*) FROM exit_rules").fetchone()[0]
+        seen |= {r[0] for r in conn.execute("SELECT id FROM tested")}
     except sqlite3.OperationalError:
         pass
-    return n
+    return seen
+
+
+def save_rejected(conn, rows):
+    """Odrzucone hipotezy — tylko odcisk palca i powod."""
+    if not rows:
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO tested (id, status) VALUES (?, ?)",
+        [(r["id"], r["status"]) for r in rows],
+    )
+    conn.commit()
 
 
 # Kolumny dokladane do schematu juz po tym, jak bazy zaczely istniec.

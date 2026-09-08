@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     horizon         INTEGER,
     made_at         TEXT,
     n_matched       INTEGER,
+    n_families      INTEGER,
     n_long          INTEGER,
     n_short         INTEGER,
     weight_long     REAL,
@@ -76,13 +77,24 @@ CREATE INDEX IF NOT EXISTS idx_pred_settled ON predictions(settled_at);
 """
 
 
+# Kolumny dokladane do tabeli predykcji juz po tym, jak zaczela istniec.
+PREDICTION_LATE_COLUMNS = (
+    ("n_families", "INTEGER"),
+)
+
+
 def get_db():
     from search import ensure_schema
 
     conn = sqlite3.connect(STRATEGY_DB)
     conn.row_factory = sqlite3.Row
-    ensure_schema(conn)      # kolumny dokladane do schematu strategii
+    ensure_schema(conn)         # kolumny w tabeli strategii
     conn.executescript(SCHEMA)  # tabela predictions
+    for col, typ in PREDICTION_LATE_COLUMNS:
+        try:
+            conn.execute(f"ALTER TABLE predictions ADD COLUMN {col} {typ}")
+        except sqlite3.OperationalError:
+            pass                # kolumna juz jest
     conn.commit()
     return conn
 
@@ -125,6 +137,38 @@ def matches(features, conditions):
     return True
 
 
+def signature(definition):
+    """
+    Sygnatura strategii: zestaw uzytych cech wraz z kierunkiem porownania.
+
+    "dist_sma_20 > 2" i "dist_sma_20 > 3" to ta sama teza w dwoch wariantach
+    progu, nie dwie niezalezne obserwacje. Ta sama sygnatura = ta sama rodzina.
+    """
+    conds = definition.get("conditions", [])
+    return tuple(sorted(
+        (c["feature"] if isinstance(c, dict) else c[0]) +
+        (c["op"] if isinstance(c, dict) else c[1])
+        for c in conds
+    ))
+
+
+def group_by_family(rows):
+    """
+    Grupuje pasujace strategie w rodziny o wspolnej sygnaturze.
+
+    Bez tego predykcje wygrywa ten pomysl, ktory ma w bazie najwiecej
+    wariantow progu — a liczba wariantow zalezy od tego, jak gesto siatka
+    akurat pokryla dana ceche, czyli od przypadku. Pomiar na danych
+    z 2026-09-04: 356 pasujacych strategii to okolo 11 niezaleznych sygnalow,
+    a najliczniejsza rodzina liczyla 26 wariantow jednej tezy.
+    """
+    families = {}
+    for r in rows:
+        sig = signature(json.loads(r["definition"]))
+        families.setdefault(sig, []).append(r)
+    return families
+
+
 def predict_for_horizon(rows, vol_percentile):
     """
     Prognoza dla jednego horyzontu. Wagą jest rating.
@@ -138,20 +182,35 @@ def predict_for_horizon(rows, vol_percentile):
     if not rows:
         return None
 
-    w = np.array([r["rating"] / 100.0 for r in rows])
-    means = np.array([r["mean"] if r["mean"] is not None else 0.0 for r in rows])
-    edges = np.array([r["edge_mean"] if r["edge_mean"] is not None else 0.0 for r in rows])
+    # --- kazda rodzina strategii ma jeden glos, nie tyle ile ma wariantow ---
+    families = group_by_family(rows)
+    fam_mean, fam_edge, fam_weight = [], [], []
+    for sig, members in families.items():
+        w_in = np.array([m["rating"] / 100.0 for m in members])
+        m_in = np.array([m["mean"] if m["mean"] is not None else 0.0 for m in members])
+        e_in = np.array([m["edge_mean"] if m["edge_mean"] is not None else 0.0 for m in members])
+        # wewnatrz rodziny usredniamy warianty progu
+        fam_mean.append(float((m_in * w_in).sum() / w_in.sum()))
+        fam_edge.append(float((e_in * w_in).sum() / w_in.sum()))
+        # waga rodziny to jakosc jej NAJLEPSZEGO czlonka, nie suma czlonkow
+        fam_weight.append(float(w_in.max()))
 
-    is_long = edges > 0
+    fam_mean = np.array(fam_mean)
+    fam_edge = np.array(fam_edge)
+    w = np.array(fam_weight)
+
+    is_long = fam_edge > 0
     w_long, w_short = float(w[is_long].sum()), float(w[~is_long].sum())
     w_all = w_long + w_short
 
-    expected_move = float((means * w).sum() / w.sum())
-    edge_weighted = float((edges * w).sum() / w.sum())
+    expected_move = float((fam_mean * w).sum() / w.sum())
+    edge_weighted = float((fam_edge * w).sum() / w.sum())
     agreement = abs(w_long - w_short) / w_all if w_all > 0 else 0.0
     avg_rating = float(np.mean([r["rating"] for r in rows]))
 
-    count_factor = min(len(rows) / 8.0, 1.0)
+    # liczba NIEZALEZNYCH glosow, nie liczba strategii
+    n_families = len(families)
+    count_factor = min(n_families / 8.0, 1.0)
     rating_factor = min(avg_rating / 85.0, 1.0)
     vol_factor = 0.7 if vol_percentile is None else 0.55 + 0.45 * vol_percentile
     confidence = round(agreement * count_factor * rating_factor * vol_factor * 100, 1)
@@ -171,8 +230,15 @@ def predict_for_horizon(rows, vol_percentile):
         "direction": "long" if (r["edge_mean"] or 0) > 0 else "short",
     } for r in detail]
 
+    # kierunek liczony po rodzinach, nie po pojedynczych strategiach
+    long_families = int(is_long.sum())
+    short_families = int((~is_long).sum())
+
     return {
         "n_matched": len(rows),
+        "n_families": n_families,
+        "n_long_families": long_families,
+        "n_short_families": short_families,
         "strategies": strategies_detail,
         "n_long": int(is_long.sum()),
         "n_short": int((~is_long).sum()),
@@ -229,11 +295,11 @@ def make_prediction(quiet=False):
         out["horizons"][str(h)] = p
         conn.execute(
             """INSERT OR REPLACE INTO predictions
-               (date, horizon, made_at, n_matched, n_long, n_short, weight_long,
-                weight_short, expected_move, edge_mean, confidence, agreement,
-                avg_rating, vol_percentile, close_price, strategy_ids)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (date, h, now, p["n_matched"], p["n_long"], p["n_short"],
+               (date, horizon, made_at, n_matched, n_families, n_long, n_short,
+                weight_long, weight_short, expected_move, edge_mean, confidence,
+                agreement, avg_rating, vol_percentile, close_price, strategy_ids)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (date, h, now, p["n_matched"], p["n_families"], p["n_long"], p["n_short"],
              p["weight_long"], p["weight_short"], p["expected_move"], p["edge_mean"],
              p["confidence"], p["agreement"], p["avg_rating"], vol_p,
              out["close_price"], json.dumps(p["strategy_ids"])),
@@ -251,7 +317,8 @@ def make_prediction(quiet=False):
             arrow = "^" if p["expected_move"] > 0 else "v" if p["expected_move"] < 0 else "-"
             print(f"  {h}D {arrow} {p['expected_move']:+.3f}%  "
                   f"(przewaga {p['edge_mean']:+.3f}%, pewnosc {p['confidence']:.0f}%, "
-                  f"{p['n_matched']} strategii: {p['n_long']}L/{p['n_short']}S)")
+                  f"{p['n_matched']} strategii w {p['n_families']} rodzinach: "
+                  f"{p['n_long_families']}L/{p['n_short_families']}S)")
     return out
 
 
