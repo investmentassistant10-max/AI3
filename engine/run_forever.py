@@ -95,6 +95,16 @@ def log(msg, to_file=True):
             f.write(f"{datetime.now().isoformat()} {msg}\n")
 
 
+def check_disk_space(path, min_free_gb=3.0):
+    """
+    SQLite potrafi uszkodzic baze, gdy zabraknie miejsca w trakcie zapisu.
+    Lepiej zatrzymac silnik swiadomie niz stracic dane.
+    """
+    import shutil
+    free_gb = shutil.disk_usage(path).free / 1e9
+    return free_gb, free_gb >= min_free_gb
+
+
 def db_stats(conn, correlation_factor=1.0):
     total = total_trials(conn)
     cand = conn.execute(
@@ -116,7 +126,12 @@ def db_stats(conn, correlation_factor=1.0):
 
 
 def print_status(conn, cycle, elapsed, correlation_factor=1.0):
-    s = db_stats(conn, correlation_factor)
+    try:
+        s = db_stats(conn, correlation_factor)
+    except sqlite3.DatabaseError as e:
+        log(f"cykl {cycle} | nie da sie odczytac statystyk: {e}")
+        log("  URUCHOM: python3 rescue_db.py --check")
+        return
     log(
         f"cykl {cycle} | {s['total']:,} hipotez | {s['candidates']:,} kandydatow | "
         f"prog |t|>{s['threshold']:.2f} | ponad progiem: {s['above_threshold']} | "
@@ -350,6 +365,15 @@ def main():
     from rating import load_correlation_factor
     corr = load_correlation_factor(conn)
     seen = all_seen_ids(conn)
+    free_gb, enough = check_disk_space(STRATEGY_DB.parent)
+    log(f"Wolne miejsce na dysku: {free_gb:.1f} GB")
+    if not enough:
+        log("ZA MALO MIEJSCA — silnik nie ruszy. SQLite przy braku miejsca")
+        log("potrafi uszkodzic baze w trakcie zapisu. Zwolnij co najmniej 3 GB")
+        log("albo uruchom: python3 compact_db.py")
+        conn.close()
+        return
+
     log(f"W bazie juz: {len(seen):,} sprawdzonych hipotez")
     s = db_stats(conn, corr)
     if corr > 1.01:
@@ -373,6 +397,14 @@ def main():
             log("Osiagnieto limit czasu.")
             break
         cycle += 1
+
+        # kontrola miejsca co dziesiaty cykl
+        if cycle % 10 == 0:
+            free_gb, enough = check_disk_space(STRATEGY_DB.parent)
+            if not enough:
+                log(f"Zostalo {free_gb:.1f} GB — zatrzymuje sie, zanim brak miejsca")
+                log("uszkodzi baze. Uruchom: python3 compact_db.py")
+                break
 
         # --- 1. systematyka (tylko raz) ---
         if not systematic_done:
