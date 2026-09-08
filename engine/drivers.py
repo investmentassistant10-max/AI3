@@ -101,7 +101,7 @@ def decompose(row, model, top=6, min_effect_pct=1.0):
     return round(base, 2), czynniki[:top]
 
 
-def residual_sigma(train, model, horizon):
+def residual_sigma(train, model, horizon, ostroznosc=1.15):
     """
     Rozrzut bledu modelu w logarytmie — podstawa przedzialu ufnosci.
 
@@ -109,7 +109,7 @@ def residual_sigma(train, model, horizon):
     pokazala blad wiekszy. Dlatego mnozymy przez wspolczynnik ostroznosci,
     zeby przedzial nie obiecywal precyzji, ktorej model nie ma.
     """
-    OSTROZNOSC = 1.15
+    OSTROZNOSC = ostroznosc
     target = f"log_fwd_rv_{horizon}"
     cols = model["features"] + [target]
     sub = train[cols].replace([np.inf, -np.inf], np.nan).dropna()

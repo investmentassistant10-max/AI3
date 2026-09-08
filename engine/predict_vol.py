@@ -33,6 +33,7 @@ import numpy as np
 from volatility import build_vol, VOL_HORIZONS
 import volmodel
 import drivers
+import pricecone
 
 ROOT = Path(__file__).resolve().parent.parent
 STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
@@ -151,8 +152,11 @@ def make_prediction(quiet=False):
         if np.isfinite(row["rv_22"])
     ]
 
+    dryf = pricecone.historical_drift(df)
+
     out = {
         "date": date,
+        "dryf_roczny_pct": round(dryf * pricecone.TRADING_DAYS * 100, 2),
         "made_at": now,
         "close_price": round(float(last["close"]), 2),
         "history": history,
@@ -204,11 +208,20 @@ def make_prediction(quiet=False):
         sigma = drivers.residual_sigma(train, model, h)
         niepewnosc = drivers.uncertainty(pred, sigma, current)
 
+        # stozek cenowy: zmiennosc -> rozklad ceny.
+        # Do stozka idzie prognoza poprawiona z mediany na srednia, bo tu
+        # liczy sie typowa WIELKOSC ruchu, nie najbardziej prawdopodobna.
+        sigma_raw = drivers.residual_sigma(train, model, h, ostroznosc=1.0)
+        popr = pricecone.mnoznik_stozka(sigma_raw)
+        cena = pricecone.opisz(float(last["close"]), pred * popr, h, dryf)
+        cena["mnoznik"] = round(popr, 3)
+
         entry = {
             "horizon": h,
             "poziom_bazowy": baza,
             "czynniki": czynniki,
             "niepewnosc": niepewnosc,
+            "cena": cena,
             "current_vol": round(current, 2) if current else None,
             "predicted_vol": round(pred, 2),
             "raw_prediction": round(raw_pred, 2),
