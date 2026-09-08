@@ -32,6 +32,7 @@ import numpy as np
 
 from volatility import build_vol, VOL_HORIZONS
 import volmodel
+import drivers
 
 ROOT = Path(__file__).resolve().parent.parent
 STRATEGY_DB = ROOT / "data" / "strategies.sqlite"
@@ -156,12 +157,21 @@ def make_prediction(quiet=False):
         "close_price": round(float(last["close"]), 2),
         "history": history,
         "horizons": {},
+        "dane": {
+            "od": df.index[0].strftime("%Y-%m-%d"),
+            "do": date,
+            "sesji": int(len(df)),
+            "sesji_uczacych": int(len(train)),
+            "zrodlo": "Yahoo Finance (^GSPC), pobierane przez Apps Script do Firestore",
+            "kopia_lokalna": "data/spx_daily.sqlite",
+            "cechy": len(volmodel.BASE_FEATURES) + len(volmodel.EXTRA_FEATURES),
+        },
         "model": {
             "name": "HAR rozszerzony",
             "walkforward_corr": 0.673,
             "walkforward_r2": 0.449,
             "beats": "HAR (0.632 / 0.395) i model naiwny (0.593 / 0.186)",
-            "period": "walidacja kroczaca 2015-2024",
+            "period": "2015-2024",
         },
     }
 
@@ -190,8 +200,15 @@ def make_prediction(quiet=False):
         # stop na dwoch odchyleniach ruchu dziennego przezywa typowy szum
         stop = 2.0 * daily
 
+        baza, czynniki = drivers.decompose(last, model)
+        sigma = drivers.residual_sigma(train, model, h)
+        niepewnosc = drivers.uncertainty(pred, sigma, current)
+
         entry = {
             "horizon": h,
+            "poziom_bazowy": baza,
+            "czynniki": czynniki,
+            "niepewnosc": niepewnosc,
             "current_vol": round(current, 2) if current else None,
             "predicted_vol": round(pred, 2),
             "raw_prediction": round(raw_pred, 2),
