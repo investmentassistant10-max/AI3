@@ -162,7 +162,7 @@ def run(start_year=2015, end_year=2024, horizon=1, sample=SEARCH_SAMPLE):
           f"{'przewaga':>9} {'korelacja':>10} {'kandyd.':>8}")
     print("-" * 96)
 
-    all_pred, all_act = [], []
+    all_pred, all_act, all_size = [], [], []
     yearly = []
 
     for year in range(start_year, end_year + 1):
@@ -176,7 +176,7 @@ def run(start_year=2015, end_year=2024, horizon=1, sample=SEARCH_SAMPLE):
             print(f"{year:>6} {len(test):>7} {'brak kandydatow':>40}")
             continue
 
-        preds, actuals = [], []
+        preds, actuals, sizes = [], [], []
         for idx, row in test.iterrows():
             r = {c: row[c] for c in df.columns if not c.startswith("fwd_")}
             move, n_m, n_f = predict_day(r, candidates, horizon, tau, sigma)
@@ -184,6 +184,7 @@ def run(start_year=2015, end_year=2024, horizon=1, sample=SEARCH_SAMPLE):
                 continue
             preds.append(move)
             actuals.append(float(row[fwd_col]))
+            sizes.append(abs(move))
 
         if len(preds) < 10:
             print(f"{year:>6} {len(test):>7} {'za malo sygnalow':>40}")
@@ -191,6 +192,7 @@ def run(start_year=2015, end_year=2024, horizon=1, sample=SEARCH_SAMPLE):
 
         preds, actuals = np.array(preds), np.array(actuals)
         all_pred.extend(preds); all_act.extend(actuals)
+        all_size.extend(sizes)
 
         hit = float(np.mean(np.sign(preds) == np.sign(actuals)) * 100)
         always_up = float(np.mean(actuals > 0) * 100)
@@ -214,6 +216,39 @@ def run(start_year=2015, end_year=2024, horizon=1, sample=SEARCH_SAMPLE):
     mae_drift = float(np.abs(drift - A).mean())
     mae_zero = float(np.abs(A).mean())
 
+    P_, A_ = np.array(all_pred), np.array(all_act)
+    print("=" * 96)
+    print("ROZBICIE — gdzie system wygrywa, a gdzie przegrywa")
+    print("=" * 96)
+
+    for label, sel in [
+        ("prognozy WZROSTU", P_ > 0),
+        ("prognozy SPADKU", P_ < 0),
+    ]:
+        if sel.sum() < 10:
+            continue
+        hit_ = np.mean(np.sign(P_[sel]) == np.sign(A_[sel])) * 100
+        base_ = np.mean(A_[sel] > 0) * 100
+        print(f"  {label:<20} {sel.sum():>6} predykcji | trafnosc {hit_:>5.1f}% | "
+              f"'zawsze wzrost' {base_:>5.1f}% | przewaga {hit_-base_:>+6.1f} pp")
+
+    # czy pewniejsze prognozy sa lepsze? Jesli nie, sygnal nie niesie informacji.
+    S_ = np.array(all_size)
+    if len(S_) == len(P_) and S_.std() > 0:
+        print()
+        q = np.quantile(S_, [0.25, 0.5, 0.75])
+        bands = [("najslabsze 25%", S_ <= q[0]), ("srodkowe 50%", (S_ > q[0]) & (S_ <= q[2])),
+                 ("najmocniejsze 25%", S_ > q[2])]
+        print("  Czy mocniejsza prognoza = lepsza? (jesli nie, sila sygnalu jest pusta)")
+        for label, sel in bands:
+            if sel.sum() < 10:
+                continue
+            hit_ = np.mean(np.sign(P_[sel]) == np.sign(A_[sel])) * 100
+            base_ = np.mean(A_[sel] > 0) * 100
+            print(f"    {label:<20} trafnosc {hit_:>5.1f}% | baza {base_:>5.1f}% | "
+                  f"przewaga {hit_-base_:>+6.1f} pp")
+
+    print()
     print("=" * 96)
     print("LACZNIE")
     print("=" * 96)
@@ -230,11 +265,18 @@ def run(start_year=2015, end_year=2024, horizon=1, sample=SEARCH_SAMPLE):
     print()
 
     # test dwumianowy: czy przewaga nad 'zawsze wzrost' to nie przypadek
-    from math import comb
+    from math import comb, erfc, sqrt
     k = int(round(hit / 100 * len(P)))
+    n_ = len(P)
     p_base = always_up / 100
-    pval = sum(comb(len(P), i) * p_base**i * (1-p_base)**(len(P)-i)
-               for i in range(k, len(P) + 1)) if len(P) < 2000 else None
+    if n_ < 2000:
+        pval = sum(comb(n_, i) * p_base**i * (1-p_base)**(n_-i) for i in range(k, n_ + 1))
+    else:
+        # przyblizenie normalne — dokladne wystarczajaco przy tysiacach prob
+        mu_ = n_ * p_base
+        sd_ = sqrt(n_ * p_base * (1 - p_base))
+        z = (k - 0.5 - mu_) / sd_ if sd_ > 0 else 0.0
+        pval = 0.5 * erfc(z / sqrt(2))
 
     # Werdykt wymaga TRZECH rzeczy naraz. Sama przewaga w trafnosci nie
     # wystarcza: model moze czesciej zgadywac kierunek, a jednoczescie mylic
