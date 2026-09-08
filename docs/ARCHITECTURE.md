@@ -369,3 +369,35 @@ ich wlasciciele latami handluja na iluzjach.
 Panel, arkusze i automat pokazuja wylacznie zmiennosc. System, ktory
 wyswietla liczbe bez wartosci predykcyjnej, predzej czy pozniej zostanie na
 niej oparty.
+
+## Pętla uczenia się — co system robi z własnymi błędami
+
+**1. Uczy się na nowych danych.** Model jest dopasowywany OD NOWA przy każdej
+prognozie, na coraz dłuższej historii. Wczorajsza sesja wchodzi do treningu
+dzisiaj. Żaden współczynnik nie jest zamrożony.
+
+**2. Weryfikuje własne prognozy.** `settle()` przy każdym uruchomieniu sprawdza,
+dla których prognoz są już dane, i dopisuje rzeczywistą zmienność oraz błąd.
+To samo robi Apps Script wieczorem w arkuszu Zmienność.
+
+**3. Koryguje systematyczne odchylenie** (`calibration_factor`). Model może
+stale zawyżać albo zaniżać — na przykład dlatego, że uczył się na okresie
+o innym reżimie. Regresja tego nie naprawi sama, bo w chwili uczenia nie zna
+jeszcze swoich przyszłych błędów. Ale my je zapisujemy, więc możemy je wykorzystać.
+
+Liczymy **medianę** stosunku rzeczywistość/prognoza z ostatnich 250 rozliczonych
+przypadków i mnożymy przez nią kolejne prognozy. Mediana, nie średnia — jeden
+skok zmienności potrafiłby przestawić mnożnik na lata.
+
+Dwa zabezpieczenia:
+- **próg 20 rozliczonych prognoz** na horyzont; poniżej system nie rusza niczego,
+  bo każda "korekta" byłaby reakcją na szum
+- **granice 0.65–1.55**; model mylący się dwukrotnie ma problem poważniejszy
+  niż przesunięcie skali i mnożnik nie ma tego maskować
+
+Sprawdzone na danych syntetycznych: przy modelu zaniżającym o 20% mnożnik
+zbiega do 1.25, przy zawyżającym o 30% do 0.70, a przy trzykrotnej pomyłce
+zatrzymuje się na granicy zamiast udawać, że wszystko naprawił.
+
+Panel pokazuje stan tej pętli: ile prognoz uzbierano, czy korekta jest aktywna
+i jaka jest surowa prognoza modelu przed korektą.

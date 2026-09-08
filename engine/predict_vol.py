@@ -68,6 +68,52 @@ def get_db():
     return conn
 
 
+# Ile rozliczonych prognoz musi byc, zanim system zacznie korygowac sam
+# siebie. Ponizej tego progu kazda "korekta" bylaby reakcja na szum.
+MIN_CALIBRATION_SAMPLES = 20
+
+# Granice korekty. Model, ktory myli sie o wiecej niz polowe, ma problem
+# powazniejszy niz przesuniecie skali — takiego nie ratujemy mnoznikiem.
+CALIBRATION_BOUNDS = (0.65, 1.55)
+
+
+def calibration_factor(conn, horizon):
+    """
+    Wspolczynnik korekty systematycznego bledu, wyliczony z wlasnych,
+    juz rozliczonych prognoz.
+
+    Model moze systematycznie zawyzac albo zanizac — na przyklad dlatego,
+    ze uczyl sie na okresie o innym rezimie zmiennosci. Regresja tego nie
+    naprawi sama, bo w chwili uczenia nie zna jeszcze swoich przyszlych
+    bledow. Ale my je znamy, bo je zapisujemy.
+
+    Liczymy MEDIANE stosunku rzeczywistosc/prognoza. Mediana, nie srednia,
+    bo pojedynczy skok zmiennosci potrafilby przestawic mnoznik na lata.
+
+    Zwraca (mnoznik, liczba_probek). Mnoznik 1.0 = brak korekty.
+    """
+    try:
+        rows = conn.execute(
+            """SELECT predicted_vol, actual_vol FROM vol_predictions
+               WHERE horizon = ? AND settled_at IS NOT NULL
+                 AND predicted_vol > 0 AND actual_vol > 0
+               ORDER BY date DESC LIMIT 250""", (horizon,)).fetchall()
+    except sqlite3.OperationalError:
+        return 1.0, 0
+
+    if len(rows) < MIN_CALIBRATION_SAMPLES:
+        return 1.0, len(rows)
+
+    ratios = np.array([r["actual_vol"] / r["predicted_vol"] for r in rows], dtype=float)
+    ratios = ratios[np.isfinite(ratios) & (ratios > 0)]
+    if len(ratios) < MIN_CALIBRATION_SAMPLES:
+        return 1.0, len(ratios)
+
+    factor = float(np.median(ratios))
+    lo, hi = CALIBRATION_BOUNDS
+    return float(np.clip(factor, lo, hi)), len(ratios)
+
+
 def regime_name(percentile):
     if percentile is None or not np.isfinite(percentile):
         return "nieznany"
@@ -126,9 +172,13 @@ def make_prediction(quiet=False):
         model = volmodel.fit(train, h)
         if model is None:
             continue
-        pred = float(volmodel.predict(df.iloc[[-1]], model).iloc[0])
-        if not np.isfinite(pred) or pred <= 0:
+        raw_pred = float(volmodel.predict(df.iloc[[-1]], model).iloc[0])
+        if not np.isfinite(raw_pred) or raw_pred <= 0:
             continue
+
+        # korekta na podstawie wlasnych, juz rozliczonych prognoz
+        factor, n_cal = calibration_factor(conn, h)
+        pred = raw_pred * factor
 
         cur_col = f"rv_{h}" if f"rv_{h}" in df.columns else "rv_22"
         current = float(last[cur_col]) if np.isfinite(last[cur_col]) else None
@@ -144,6 +194,9 @@ def make_prediction(quiet=False):
             "horizon": h,
             "current_vol": round(current, 2) if current else None,
             "predicted_vol": round(pred, 2),
+            "raw_prediction": round(raw_pred, 2),
+            "calibration_factor": round(factor, 3),
+            "calibration_samples": n_cal,
             "change_pct": round(change, 1) if change is not None else None,
             "percentile": round(pct, 3) if pct is not None else None,
             "regime": regime_name(pct),
@@ -161,9 +214,14 @@ def make_prediction(quiet=False):
 
         if not quiet:
             arrow = "^" if (change or 0) > 3 else "v" if (change or 0) < -3 else "-"
+            cal = ""
+            if n_cal >= MIN_CALIBRATION_SAMPLES:
+                cal = f" | korekta x{factor:.2f} z {n_cal} rozliczonych"
+            elif n_cal:
+                cal = f" | korekta czeka ({n_cal}/{MIN_CALIBRATION_SAMPLES})"
             print(f"  {h:>2} sesji {arrow} zmiennosc {pred:>5.1f}% rocznie "
                   f"(teraz {current:>5.1f}%, {change:+.0f}%) | {entry['regime']:<16} "
-                  f"| typowy ruch dnia {daily:.2f}% | stop {stop:.2f}%")
+                  f"| ruch dnia {daily:.2f}% | stop {stop:.2f}%{cal}")
 
     conn.commit()
     conn.close()

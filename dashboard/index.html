@@ -348,16 +348,39 @@ async function main(){
     $("practical").innerHTML=html;
   }
 
-  // skutecznosc
+  // skutecznosc i stan korekty
   const sb=D.scoreboard;
+  const cal = main5 && main5.calibration_samples!=null ? main5 : null;
+  let scoreHtml;
   if(sb && sb.n){
-    $("score").innerHTML=`Rozliczonych prognoz: <b>${sb.n}</b>, korelacja `
+    scoreHtml=`Rozliczonych prognoz: <b>${sb.n}</b>, korelacja `
       +`<b>${fmt(sb.corr,3)}</b>, średni błąd względny <b>${fmt(sb.mape,1)}%</b>.`;
   } else {
-    $("score").innerHTML="Brak rozliczonych prognoz — pierwsze pojawią się po kilku sesjach. "
+    scoreHtml="Brak rozliczonych prognoz — pierwsze pojawią się po kilku sesjach. "
       +"<b>To jedyna miara liczona na danych, których model nie widział</b>, "
       +"gdy stawiał tezę.";
   }
+  if(cal){
+    const n=cal.calibration_samples, f=cal.calibration_factor;
+    scoreHtml += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">`;
+    if(n>=20 && f && Math.abs(f-1)>0.02){
+      const dir = f>1 ? "zaniżał" : "zawyżał";
+      scoreHtml += `<b>Korekta własnych błędów: aktywna (×${fmt(f,2)}).</b> `
+        +`Model systematycznie ${dir} prognozy, więc system mnoży je przez `
+        +`współczynnik wyliczony z ${n} rozliczonych przypadków. `
+        +`Surowa prognoza modelu: ${fmt(cal.raw_prediction,1)}%.`;
+    } else if(n>=20){
+      scoreHtml += `<b>Korekta aktywna, ale nie potrzebna</b> — model nie wykazuje `
+        +`systematycznego odchylenia na ${n} rozliczonych prognozach.`;
+    } else {
+      scoreHtml += `<b>Korekta własnych błędów: zbiera dane (${n}/20).</b> `
+        +`Gdy uzbiera się dwadzieścia rozliczonych prognoz, system zacznie korygować `
+        +`systematyczne odchylenie modelu — mnożąc prognozy przez współczynnik `
+        +`wyliczony z jego własnych pomyłek.`;
+    }
+    scoreHtml += `</div>`;
+  }
+  $("score").innerHTML=scoreHtml;
 
   const M=D.model||{};
   $("footer").innerHTML=
