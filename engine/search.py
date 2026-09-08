@@ -152,8 +152,23 @@ def ensure_schema(conn):
 
 
 def get_db():
+    """
+    Polaczenie z baza w trybie WAL.
+
+    WAL (write-ahead log) pozwala czytac baze w trakcie zapisu bez ryzyka
+    zobaczenia niespojnego obrazu — czytelnicy pracuja na migawce, pisarz
+    dopisuje obok. W trybie domyslnym (rollback journal) jednoczesny odczyt
+    i zapis moga sie zderzyc, zwlaszcza gdy jeden z procesow siega do pliku
+    przez sieciowy mount, gdzie blokady plikowe nie dzialaja niezawodnie.
+
+    synchronous=NORMAL zamiast FULL: przy WAL to nadal bezpieczne wobec
+    awarii aplikacji, a znaczaco szybsze przy milionach zapisow.
+    """
     STRATEGY_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(STRATEGY_DB)
+    conn = sqlite3.connect(STRATEGY_DB, timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     return ensure_schema(conn)
 
 

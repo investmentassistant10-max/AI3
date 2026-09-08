@@ -285,6 +285,19 @@ przeniesienia istniejacych. Pomiar: 1.54 GB -> ~0.20 GB, czyli 1.34 GB
 odzyskane. Deduplikacja i licznik prob dzialaja bez zmian, bo obie tabele sa
 liczone razem.
 
-**Uwaga techniczna.** Bazy SQLite nie wolno czytac przez zdalny mount, gdy
-silnik pisze — daje to blad "database disk image is malformed", ktory NIE
-oznacza uszkodzenia. Do odczytu podczas pracy silnika: tryb `mode=ro&immutable=1`.
+**Uszkodzenie bazy (2026-09-08).** Silnik padl z "database disk image is
+malformed" przy zapytaniu skanujacym tabele. Wolnego miejsca bylo 33 GB, wiec
+brak miejsca to nie byla przyczyna. Najbardziej prawdopodobne wyjasnienie:
+baza byla czytana przez zdalny mount w trakcie, gdy silnik do niej pisal —
+SQLite polega na blokadach plikowych, a te przez siec nie dzialaja niezawodnie.
+
+Naprawa techniczna, zeby nie zalezalo to od niczyjej dyscypliny:
+- baza pracuje w trybie **WAL** (write-ahead log): czytelnicy widza spojna
+  migawke, pisarz dopisuje obok, nikt nikomu nie wchodzi w droge
+- `busy_timeout=30000` — polaczenia czekaja na zwolnienie zamiast zglaszac blad
+- `synchronous=NORMAL` — przy WAL nadal bezpieczne wobec awarii aplikacji,
+  a znaczaco szybsze przy milionach zapisow
+
+Do odzyskania danych z uszkodzonej bazy sluzy `rescue_db.py`. Silnik sprawdza
+tez wolne miejsce (start i co dziesiaty cykl) i zatrzymuje sie swiadomie
+ponizej 3 GB.

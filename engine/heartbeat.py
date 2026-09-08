@@ -136,7 +136,8 @@ def push_exit_rules(top=40):
         firebase_admin.initialize_app(credentials.Certificate(str(KEY_PATH)))
     db = firestore.client()
 
-    conn = sqlite3.connect(STRATEGY_DB)
+    conn = sqlite3.connect(STRATEGY_DB, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(

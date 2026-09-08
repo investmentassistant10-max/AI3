@@ -119,6 +119,7 @@ def rescue():
     src = open_ro(DB)
     dst = sqlite3.connect(NEW)
     dst.execute("PRAGMA journal_mode=WAL")
+    dst.execute("PRAGMA synchronous=NORMAL")
 
     print("Przepisuje do czystej bazy...\n")
     total_ok = total_lost = 0

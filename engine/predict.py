@@ -86,7 +86,8 @@ PREDICTION_LATE_COLUMNS = (
 def get_db():
     from search import ensure_schema
 
-    conn = sqlite3.connect(STRATEGY_DB)
+    conn = sqlite3.connect(STRATEGY_DB, timeout=30.0)
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.row_factory = sqlite3.Row
     ensure_schema(conn)         # kolumny w tabeli strategii
     conn.executescript(SCHEMA)  # tabela predictions
