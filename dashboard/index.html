@@ -500,8 +500,12 @@ async function main() {
       : `oczekiwany ruch <b>${pct(expectedMove)}</b> · pewność <b>${confidence}%</b> `
         + `<span class="note">(${near.set.length} ${near.set.length === 1 ? "strategia" : "strategii"} o horyzoncie 1 dnia)</span>`;
 
-  $("matchCount").textContent = matched.length;
-  $("matchDetail").textContent = `z ${all.length} strategii w bazie (rating ≥ ${CFG.minRating})`;
+  const engineMatched = ready?.n_strategies_matched;
+  const engineConsidered = ready?.n_strategies_considered;
+  $("matchCount").textContent = engineMatched !== undefined ? engineMatched : matched.length;
+  $("matchDetail").textContent = engineConsidered !== undefined
+    ? `sprawdzono ${engineConsidered.toLocaleString("pl-PL")} strategii-kandydatów`
+    : `z ${all.length} strategii w bazie (rating ≥ ${CFG.minRating})`;
 
   // --- rozklad ---
   const pL = wAll > 0 ? wLong / wAll * 100 : 0;
@@ -586,8 +590,40 @@ async function main() {
   $("conclusion").innerHTML = concl;
 
   // --- tabela ---
+  // Lista pochodzi z predykcji policzonej przez silnik, bo on sprawdza
+  // WSZYSTKIE strategie-kandydatow, a panel widzi w Firestore tylko top 100
+  // wg ratingu — a te prawie nigdy nie sa tymi, ktore dzis pasuja.
+  const fromEngine = [];
+  if (ready?.horizons) {
+    const seenDesc = new Set();
+    Object.keys(ready.horizons).sort((a, b) => a - b).forEach(h => {
+      (ready.horizons[h].strategies || []).forEach(s => {
+        const key = s.description + "|" + h;
+        if (seenDesc.has(key)) return;
+        seenDesc.add(key);
+        fromEngine.push({ ...s, horizon: Number(h) });
+      });
+    });
+  }
+
   const tb = $("matchTable").querySelector("tbody");
-  if (!matched.length) {
+  if (fromEngine.length) {
+    tb.innerHTML = fromEngine
+      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+      .slice(0, 60)
+      .map(s => {
+        const isLong = s.direction === "long";
+        return `<tr>
+          <td><span class="pill ${isLong ? "long" : "short"}">${isLong ? "LONG" : "SHORT"}</span></td>
+          <td>${fmt(s.rating, 1)}</td>
+          <td class="${isLong ? "up" : "down"}">${pct(s.edge_mean)}</td>
+          <td>${fmt(s.hit_rate, 1)}%</td>
+          <td>${s.horizon}d</td>
+          <td>${s.n_episodes ?? "—"}</td>
+          <td class="desc">${s.description || ""}</td>
+        </tr>`;
+      }).join("");
+  } else if (!matched.length) {
     tb.innerHTML = `<tr><td colspan="7" class="note">Dziś żadna strategia nie ma spełnionych warunków.</td></tr>`;
   } else {
     tb.innerHTML = matched.slice(0, 40).map(s => {

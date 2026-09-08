@@ -42,7 +42,10 @@ KEY_PATH = ROOT / "firebase" / "serviceAccountKey.json"
 
 HORIZONS = (1, 2, 3, 5, 10)
 MIN_RATING = 40.0
-STRATEGY_LIMIT = 500
+
+# Ile PASUJACYCH strategii bierzemy do predykcji. To nie jest limit na
+# przeszukiwanie bazy — te sprawdzamy w calosci.
+MATCHED_LIMIT = 500
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS predictions (
@@ -84,15 +87,24 @@ def get_db():
     return conn
 
 
-def load_strategies(conn, limit=STRATEGY_LIMIT, min_rating=MIN_RATING):
+def load_strategies(conn, min_rating=MIN_RATING):
+    """
+    Wszystkie strategie-kandydaci, nie tylko czolowka.
+
+    Wczesniej bralismy 500 najlepszych i dopiero potem sprawdzali, ktore
+    pasuja do dzisiejszego rynku. Kolejnosc byla odwrotna niz trzeba: czolowka
+    rankingu to warianty jednego pomyslu, wiec kiedy on nie pasowal, wychodzilo
+    zero — mimo ze setki innych strategii mialy spelnione warunki, tylko lezaly
+    nizej w rankingu.
+    """
     return conn.execute(
         """SELECT id, definition, description, horizon, rating, mean, base_mean,
                   edge_mean, hit_rate, base_hit_rate, n_episodes, t_stat,
                   placebo_p, treasury_status
            FROM strategies
            WHERE status='candidate' AND rating >= ?
-           ORDER BY rating DESC LIMIT ?""",
-        (min_rating, limit),
+           ORDER BY rating DESC""",
+        (min_rating,),
     ).fetchall()
 
 
@@ -144,8 +156,24 @@ def predict_for_horizon(rows, vol_percentile):
     vol_factor = 0.7 if vol_percentile is None else 0.55 + 0.45 * vol_percentile
     confidence = round(agreement * count_factor * rating_factor * vol_factor * 100, 1)
 
+    # szczegoly do pokazania w panelu — panel widzi w Firestore tylko top 100
+    # strategii wg ratingu, a te prawie nigdy nie sa tymi, ktore dzis pasuja
+    detail = sorted(rows, key=lambda r: -(r["rating"] or 0))[:25]
+    strategies_detail = [{
+        "description": r["description"],
+        "rating": r["rating"],
+        "mean": r["mean"],
+        "edge_mean": r["edge_mean"],
+        "hit_rate": r["hit_rate"],
+        "base_hit_rate": r["base_hit_rate"],
+        "n_episodes": r["n_episodes"],
+        "t_stat": r["t_stat"],
+        "direction": "long" if (r["edge_mean"] or 0) > 0 else "short",
+    } for r in detail]
+
     return {
         "n_matched": len(rows),
+        "strategies": strategies_detail,
         "n_long": int(is_long.sum()),
         "n_short": int((~is_long).sum()),
         "weight_long": round(w_long, 3),
@@ -178,14 +206,19 @@ def make_prediction(quiet=False):
         print("Brak strategii w bazie. Uruchom najpierw silnik.")
         return None
 
+    # najpierw dopasowanie do dzisiejszego rynku, potem ranking
     matched = [
         r for r in strategies
         if matches(features, json.loads(r["definition"]).get("conditions", []))
     ]
+    if len(matched) > MATCHED_LIMIT:
+        matched = matched[:MATCHED_LIMIT]   # juz posortowane po ratingu
 
     now = datetime.now(timezone.utc).isoformat()
     out = {"date": date, "made_at": now, "close_price": round(float(last["close"]), 2),
-           "vol_percentile": vol_p, "n_strategies_considered": len(strategies),
+           "vol_percentile": vol_p,
+           "n_strategies_considered": len(strategies),
+           "n_strategies_matched": len(matched),
            "horizons": {}}
 
     for h in HORIZONS:
@@ -211,6 +244,7 @@ def make_prediction(quiet=False):
 
     if not quiet:
         print(f"Predykcja na {date} (zamkniecie {out['close_price']}):")
+        print(f"  sprawdzono {len(strategies):,} strategii, warunki spelnia {len(matched):,}")
         if not out["horizons"]:
             print("  zadna strategia nie ma dzis zastosowania")
         for h, p in out["horizons"].items():
