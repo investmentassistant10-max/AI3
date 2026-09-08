@@ -161,13 +161,14 @@ def get_db():
     i zapis moga sie zderzyc, zwlaszcza gdy jeden z procesow siega do pliku
     przez sieciowy mount, gdzie blokady plikowe nie dzialaja niezawodnie.
 
-    synchronous=NORMAL zamiast FULL: przy WAL to nadal bezpieczne wobec
-    awarii aplikacji, a znaczaco szybsze przy milionach zapisow.
+    synchronous=FULL: po dwoch uszkodzeniach bazy w ciagu doby (za drugim
+    razem zniknal caly naglowek pliku) wybieramy pewnosc zamiast szybkosci.
+    Zapisy ida paczkami co kilka sekund, wiec koszt jest niewielki.
     """
     STRATEGY_DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(STRATEGY_DB, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA synchronous=FULL")
     conn.execute("PRAGMA busy_timeout=30000")
     return ensure_schema(conn)
 

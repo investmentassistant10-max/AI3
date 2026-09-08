@@ -38,6 +38,8 @@ from pathlib import Path
 
 import numpy as np
 
+import dbguard
+
 from search import (get_db, save_batch, save_rejected, all_seen_ids,
                     total_trials, CANDIDATE_THRESHOLD)
 
@@ -60,6 +62,7 @@ SYNC_EVERY_CYCLES = 12      # co ile cykli sprawdzamy nowe dane
 # Kazdy push to ~100 zapisow dokumentow — przy dlugim biegu warto, zeby
 # zdarzal sie rzadko i regularnie.
 # Puls to jeden maly dokument — moze chodzic czesto.
+BACKUP_EVERY_CYCLES = 200
 HEARTBEAT_INTERVAL_SECONDS = 15 * 60
 # Strategie to sto dokumentow na raz. Co kwadrans dawaloby 9600 zapisow
 # dziennie przy darmowym limicie 20 000 — polowa budzetu na dane, ktore
@@ -361,6 +364,19 @@ def main():
     if problems:
         log(f"UWAGI DO DANYCH: {problems}")
 
+    ok, msg = dbguard.quick_check(STRATEGY_DB)
+    if not ok:
+        log(f"BAZA USZKODZONA: {msg}")
+        kopia = dbguard.newest_snapshot()
+        if kopia:
+            log(f"Jest migawka: {kopia}")
+            log("Odzyskanie:")
+            log(f"  python3 rescue_db.py --from '{kopia}'")
+        else:
+            log("Odzyskanie ze starszej kopii:")
+            log("  python3 rescue_db.py --from ../data/strategies.uszkodzona.sqlite")
+        return
+
     conn = get_db()   # get_db samo dokłada brakujace kolumny
     from rating import load_correlation_factor
     corr = load_correlation_factor(conn)
@@ -397,6 +413,14 @@ def main():
             log("Osiagnieto limit czasu.")
             break
         cycle += 1
+
+        # migawka bazy — jedyna ochrona przed utrata logu predykcji
+        if cycle % BACKUP_EVERY_CYCLES == 0:
+            sciezka, info = dbguard.snapshot(conn)
+            if sciezka:
+                log(f"migawka bazy: {sciezka.name} ({info:.0f}s)")
+            else:
+                log(f"migawka nieudana: {info}")
 
         # kontrola miejsca co dziesiaty cykl
         if cycle % 10 == 0:
