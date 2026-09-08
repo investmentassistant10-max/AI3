@@ -221,3 +221,36 @@ limitu na dane, ktore zmieniaja sie o kilka pozycji na godzine.
 
 Historia przebiegow (`engine_runs`) jest przycinana do 500 ostatnich punktow,
 zeby kolekcja nie rosla bez konca.
+
+## Jak czytac skarbiec (poprawka z 2026-09-08)
+
+Skarbiec to 502 sesje. Strategia o czestotliwosci 5% daje w nim jakies
+25 sygnalow — a przy dwudziestu pieciu obserwacjach szansa, ze srednia wyjdzie
+w przewidywanym kierunku czystym przypadkiem, to mniej wiecej rzut moneta.
+
+Wynika z tego rzecz, ktora latwo przeoczyc: **"potwierdzona" pojedyncza
+strategia nie znaczy prawie nic**. Przy stu sprawdzeniach okolo piecdziesieciu
+przejdzie samym przypadkiem, a lista piecdziesieciu potwierdzonych strategii
+wyglada przekonujaco mimo ze nie zawiera zadnej informacji.
+
+Skarbiec ma za to moc, zeby ocenic CALA GRUPE naraz:
+
+| wynik | p (z przypadku) | ocena |
+|---|---|---|
+| 5 z 7 | 0.227 | szum |
+| 11 z 20 | 0.412 | szum |
+| 14 z 20 | 0.058 | szum |
+| 16 z 20 | 0.006 | przypadek nie tlumaczy |
+| 18 z 20 | 0.0002 | przypadek nie tlumaczy |
+
+`validate.py` liczy teraz te wartosc (rozklad dwumianowy) i wypisuje werdykt
+dla grupy zamiast zostawiac uzytkownika z lista pojedynczych "TAK".
+
+Konsekwencja dla wczesniejszych wynikow: raportowane w tej sesji "5 z 7
+potwierdzonych" i "3 z 10" **nie byly dowodem niczego** — pierwszy miesci sie
+w przypadku z zapasem, drugi jest ponizej oczekiwanej polowy. Dopiero wynik
+rzedu 16 z 20 bylby argumentem.
+
+Prawdziwy test pozostaje ten sam co wczesniej: log predykcji, gdzie kazdy
+kolejny dzien dokłada nowa, nigdy wczesniej niewidziana obserwacje — zamiast
+kolejny raz odpytywac te same 502 sesje.

@@ -103,6 +103,7 @@ def validate_top(n=10):
     print("-" * 108)
 
     n_confirmed = 0
+    evaluable = 0
     now = datetime.now(timezone.utc).isoformat()
 
     for r in rows:
@@ -123,6 +124,7 @@ def validate_top(n=10):
             same_direction = t_edge_mean * r["edge_mean"] > 0
             status = "potwierdzona" if same_direction else "obalona"
             verdict = "TAK" if same_direction else "nie"
+            evaluable += 1
             if same_direction:
                 n_confirmed += 1
 
@@ -145,9 +147,53 @@ def validate_top(n=10):
     conn.commit()
 
     print("-" * 108)
-    print(f"\nPotwierdzonych na skarbcu: {n_confirmed} z {len(rows)}")
-    print(f"Budzet skarbca po tej operacji: {treasury_budget_used(conn)} odpytan")
+    _group_verdict(n_confirmed, evaluable)
+    print(f"\nBudzet skarbca po tej operacji: {treasury_budget_used(conn)} z {TREASURY_BUDGET}")
     conn.close()
+
+
+def _binomial_tail(k, n, p=0.5):
+    """P(co najmniej k sukcesow z n przy prawdopodobienstwie p) — bez scipy."""
+    from math import comb
+    return sum(comb(n, i) * p**i * (1 - p)**(n - i) for i in range(k, n + 1))
+
+
+def _group_verdict(n_confirmed, n_evaluable):
+    """
+    Ocena CALEJ GRUPY, nie pojedynczych strategii.
+
+    Skarbiec to 502 sesje. Strategia o czestotliwosci 5% daje w nim jakies
+    25 sygnalow — przy tylu obserwacjach szansa, ze srednia wyjdzie
+    w przewidywanym kierunku czystym przypadkiem, to mniej wiecej rzut
+    moneta. Dlatego "potwierdzona" pojedyncza strategia nie znaczy prawie nic.
+
+    Znaczenie ma dopiero to, ile ich przeszlo LACZNIE. Osiemnascie na
+    dwadziescia to wynik, ktorego przypadek nie tlumaczy. Jedenascie na
+    dwadziescia to szum.
+    """
+    if not n_evaluable:
+        print("\nBrak strategii, ktore dalo sie ocenic na skarbcu.")
+        return
+
+    expected = n_evaluable * 0.5
+    p = _binomial_tail(n_confirmed, n_evaluable)
+
+    print(f"\nPotwierdzonych: {n_confirmed} z {n_evaluable} ocenialnych")
+    print(f"Przy czystym przypadku spodziewalibysmy sie okolo {expected:.1f}")
+    print(f"Prawdopodobienstwo takiego wyniku z przypadku: {p:.3f}")
+
+    if p < 0.01:
+        verdict = "GRUPA PRZESZLA — tego przypadek nie tlumaczy"
+    elif p < 0.05:
+        verdict = "grupa wypadla lepiej niz przypadek, ale bez zapasu"
+    elif n_confirmed < expected:
+        verdict = "GRUPA NIE PRZESZLA — gorzej niz rzut moneta"
+    else:
+        verdict = "nierozstrzygniete — wynik miesci sie w przypadku"
+    print(f"-> {verdict}")
+
+    if n_evaluable < 10:
+        print("   (przy mniej niz dziesieciu strategiach ta ocena i tak jest slaba)")
 
 
 if __name__ == "__main__":
