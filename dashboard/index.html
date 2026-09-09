@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IA3 — prognoza zmienności SP500</title>
+<title>IA3 — prognoza SP500</title>
 <style>
   :root{
     color-scheme:light;
@@ -120,7 +120,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>IA3 <span>— prognoza zmienności SP500</span></h1>
+    <h1>IA3 <span>— prognoza SP500</span></h1>
     <div class="note" id="stamp">wczytuję…</div>
   </header>
 
@@ -142,6 +142,20 @@
       <div class="countdown" id="countdown">—</div>
       <div class="sub" id="clockInfo">NYSE 9:30 ET</div>
     </div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <h2>Prognoza ceny
+      <span class="tabs" id="cenaTabs"></span>
+    </h2>
+    <div class="grid c2" style="margin-bottom:0;gap:18px">
+      <div>
+        <div id="cenaChart"></div>
+        <div class="legend" id="cenaLegend" style="margin-top:10px"></div>
+      </div>
+      <div id="cenaPanel"></div>
+    </div>
+    <div class="note" id="cenaNote" style="margin-top:12px"></div>
   </div>
 
   <div class="grid c2">
@@ -361,6 +375,81 @@ function chart(history, horizons){
   return s;
 }
 
+// ---------- wykres ceny ze stożkiem ----------
+function coneChart(history, horizons, wybrany){
+  let px=history.filter(h=>h.close!=null);
+  if(!px.length) return "";
+  // tyle historii, żeby stożek nie był ściśnięty przy krawędzi
+  px=px.slice(-Math.max(24, Math.min(px.length, wybrany*4)));
+  const hs=Object.keys(horizons).map(Number).sort((a,b)=>a-b)
+    .filter(h=>horizons[String(h)].cena);
+  if(!hs.length) return "";
+  const maxH=wybrany;
+  const proj=[{day:0,p10:px[px.length-1].close,p25:px[px.length-1].close,
+               p50:px[px.length-1].close,p75:px[px.length-1].close,p90:px[px.length-1].close}]
+    .concat(hs.filter(h=>h<=maxH).map(h=>({day:h,...horizons[String(h)].cena})));
+
+  const W=700,H=290,P={t:14,r:84,b:26,l:56};
+  const all=[...px.map(d=>d.close),...proj.flatMap(p=>[p.p10,p.p90])];
+  const lo=Math.min(...all), hi=Math.max(...all), pad=(hi-lo)*0.08;
+  const total=px.length+maxH;
+  const x=i=>P.l+(W-P.l-P.r)*(i/Math.max(total-1,1));
+  const y=v=>P.t+(H-P.t-P.b)*(1-(v-(lo-pad))/Math.max((hi+pad)-(lo-pad),1e-6));
+  const last=px.length-1;
+
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cena SP500 i stożek prognozy">`;
+  for(let i=0;i<=4;i++){
+    const v=(lo-pad)+((hi+pad)-(lo-pad))*i/4, yy=y(v);
+    s+=`<line x1="${P.l}" y1="${yy}" x2="${W-P.r}" y2="${yy}" stroke="var(--line)"/>`;
+    s+=`<text x="${P.l-7}" y="${yy+3.5}" font-size="10" fill="var(--dimmer)" text-anchor="end">${v.toFixed(0)}</text>`;
+  }
+  const wstega=(a,b,op)=>{
+    const up=proj.map((p,i)=>`${i?"L":"M"}${x(last+p.day)},${y(p[a])}`).join(" ");
+    const dn=proj.slice().reverse().map(p=>`L${x(last+p.day)},${y(p[b])}`).join(" ");
+    return `<path d="${up} ${dn} Z" fill="var(--fcst)" fill-opacity="${op}"/>`;
+  };
+  s+=wstega("p90","p10",0.13)+wstega("p75","p25",0.22);
+  s+=`<path d="${px.map((d,i)=>`${i?"L":"M"}${x(i)},${y(d.close)}`).join(" ")}"
+        fill="none" stroke="var(--hist)" stroke-width="2" stroke-linejoin="round"/>`;
+  s+=`<path d="${proj.map((p,i)=>`${i?"L":"M"}${x(last+p.day)},${y(p.p50)}`).join(" ")}"
+        fill="none" stroke="var(--fcst)" stroke-width="2" stroke-dasharray="4 3"/>`;
+  [0,Math.floor(px.length/2),px.length-1].forEach(i=>{
+    if(px[i]) s+=`<text x="${x(i)}" y="${H-6}" font-size="9.5" fill="var(--dimmer)" text-anchor="middle">${px[i].date.slice(5)}</text>`;
+  });
+  const e=proj[proj.length-1], ex=x(last+e.day);
+  [["p90",e.p90],["p50",e.p50],["p10",e.p10]].forEach(([k,v])=>{
+    s+=`<text x="${ex+7}" y="${y(v)+3.5}" font-size="10.5"
+         font-weight="${k==="p50"?"650":"400"}"
+         fill="${k==="p50"?"var(--fcst)":"var(--dimmer)"}">${v.toFixed(0)}</text>`;
+  });
+  s+=`</svg>`;
+  return s;
+}
+
+function cenaHtml(e, close){
+  const c=e&&e.cena;
+  if(!c) return `<div class="note">Prognoza ceny pojawi się po najbliższym uruchomieniu
+    <code>ia3 zmiennosc</code>.</div>`;
+  const zn=v=>(v>=close?"+":"")+((v/close-1)*100).toFixed(1)+"%";
+  return `
+    <div class="row"><span class="k">Powyżej dzisiejszego zamknięcia</span>
+      <span class="v">${proc(c.p_powyzej_dzis)}</span></div>
+    <div class="row"><span class="k">Mediana (środek rozkładu)</span>
+      <span class="v">${c.p50.toFixed(0)} <span class="note">${zn(c.p50)}</span></span></div>
+    <div class="row"><span class="k">Połowa przypadków</span>
+      <span class="v">${c.p25.toFixed(0)} – ${c.p75.toFixed(0)}</span></div>
+    <div class="row"><span class="k">Cztery na pięć</span>
+      <span class="v">${c.p10.toFixed(0)} – ${c.p90.toFixed(0)}</span></div>
+    <div class="row"><span class="k">Dotknie +1% (${(close*1.01).toFixed(0)})</span>
+      <span class="v">${proc(c.p_dotknie_gora_1pct)}</span></div>
+    <div class="row"><span class="k">Dotknie −1% (${(close*0.99).toFixed(0)})</span>
+      <span class="v">${proc(c.p_dotknie_dol_1pct)}</span></div>
+    <div class="row"><span class="k">Dotknie +2% (${(close*1.02).toFixed(0)})</span>
+      <span class="v">${proc(c.p_dotknie_gora_2pct)}</span></div>
+    <div class="row"><span class="k">Dotknie −2% (${(close*0.98).toFixed(0)})</span>
+      <span class="v">${proc(c.p_dotknie_dol_2pct)}</span></div>`;
+}
+
 // ---------- rozkład na czynniki ----------
 function driversHtml(e){
   if(!e || !e.czynniki || !e.czynniki.length)
@@ -468,6 +557,39 @@ async function main(){
     +`<span><i class="band"></i>przedział 50% (połowa przypadków)</span>`;
   $("chartNote").innerHTML="Linia ciągła liczona jest na bieżąco z ostatnich 22 sesji. "
     +"Punkty to prognoza na kolejne horyzonty, pasmo obejmuje połowę przypadków. Szerszy przedział — cztery na pięć — jest w tabeli niżej.";
+
+  // prognoza ceny
+  const cenaKeys=keys.filter(h=>H[String(h)].cena);
+  if(cenaKeys.length){
+    let ch = cenaKeys.includes(5) ? 5 : cenaKeys[cenaKeys.length-1];
+    $("cenaTabs").innerHTML=cenaKeys.map(h=>
+      `<button class="tab" data-h="${h}">${hName(h)}</button>`).join("");
+    const rysujCene=()=>{
+      $("cenaChart").innerHTML=coneChart(D.history||[],H,ch);
+      $("cenaPanel").innerHTML=cenaHtml(H[String(ch)],D.close_price);
+      $("cenaTabs").querySelectorAll(".tab").forEach(b=>
+        b.setAttribute("aria-pressed", String(+b.dataset.h===ch)));
+    };
+    $("cenaTabs").addEventListener("click",ev=>{
+      const b=ev.target.closest(".tab"); if(!b) return; ch=+b.dataset.h; rysujCene();
+    });
+    rysujCene();
+    $("cenaLegend").innerHTML=
+      `<span><i style="border-color:var(--hist)"></i>cena zamknięcia</span>`
+      +`<span><i style="border-color:var(--fcst);border-top-style:dashed"></i>mediana prognozy</span>`
+      +`<span><i class="band" style="background:color-mix(in srgb,var(--fcst) 34%,transparent)"></i>połowa przypadków</span>`
+      +`<span><i class="band"></i>cztery na pięć</span>`;
+    $("cenaNote").innerHTML=`<b>To nie jest prognoza kierunku.</b> Środek stożka leży prawie
+      dokładnie tam, gdzie dziś zamknięcie — przesuwa go tylko historyczny dryf indeksu
+      (${D.dryf_roczny_pct??"—"}% rocznie), który na kilku sesjach jest ledwie widoczny.
+      Wartość jest w <b>szerokości</b> stożka: mówi, gdzie cena realnie może się znaleźć
+      i z jakim prawdopodobieństwem. Sprawdzone na 2 935 przypadkach z lat 2015–2026:
+      pasmo „połowa przypadków" obejmowało 49–51% z nich, pasmo „cztery na pięć" 76–84%.
+      <br><br><b>Dotknięcie to co innego niż zamknięcie.</b> Cena może przebić poziom
+      i wrócić — dlatego szansa dotknięcia jest zawsze wyższa niż szansa zamknięcia po
+      drugiej stronie. Stop postawiony tam, gdzie „raczej nie zamkniemy", bywa wybijany
+      dwa razy częściej, niż się wydaje.`;
+  }
 
   // czynniki — z przełącznikiem horyzontu
   let wybrany = H["5"] ? 5 : keys[0];
