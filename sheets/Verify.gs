@@ -65,8 +65,30 @@ function verifyMorningData() {
         (close !== null ? close.toFixed(2) : '?');
       state = 'ok';
     } else {
-      candles = 'BRAK świecy z ' + expectedIso + ' — sprawdź dailyUpdate';
-      state = 'error';
+      // Świecy nie ma — ale to nie musi znaczyć awarii. Triggery czasowe
+      // Apps Script odpalają się w losowej minucie godziny, więc weryfikacja
+      // potrafi wyprzedzić aktualizację (9.09.2026: weryfikacja 8:11,
+      // dailyUpdate 8:27 — alarm o braku danych, których nikt jeszcze nie
+      // zdążył pobrać). Zamiast zgadywać kolejność, dociągamy je tutaj.
+      // dailyUpdate jest idempotentny, więc powtórzenie nic nie psuje.
+      try {
+        dailyUpdate();
+        doc = firestoreGetDoc_('spx_daily/' + expectedIso);
+      } catch (e2) {
+        doc = null;
+        Logger.log('Awaryjne dailyUpdate nie powiodło się: ' + e2.message);
+      }
+
+      if (doc) {
+        var close2 = fsValue_(doc.fields && doc.fields.close);
+        candles = 'OK — ' + expectedIso + ', zamknięcie ' +
+          (close2 !== null ? close2.toFixed(2) : '?') + ' (dociągnięte przy weryfikacji)';
+        state = 'ok';
+      } else {
+        candles = 'BRAK świecy z ' + expectedIso +
+          ' — dailyUpdate uruchomiony ponownie i nadal nic';
+        state = 'error';
+      }
     }
   } catch (e) {
     candles = 'błąd odczytu: ' + e.message;
