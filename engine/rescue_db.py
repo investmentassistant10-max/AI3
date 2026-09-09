@@ -91,6 +91,25 @@ def list_tables(src):
         return list(PRIORITY)
 
 
+def oryginalny_schemat(src, nazwa):
+    """
+    Polecenie CREATE TABLE ze zrodla — z kluczami glownymi i ograniczeniami.
+
+    Wczesniej odtwarzalismy tabele z samej listy kolumn. Dane przezyly, ale
+    klucze glowne nie, a to psuje sie po cichu: INSERT OR REPLACE nie ma czego
+    zastapic i dopisuje, INSERT OR IGNORE nie odsiewa duplikatow. W exit_rules
+    dalo to 136 460 wierszy przy 660 faktycznych regulach, zanim ktokolwiek
+    zauwazyl. Odtwarzanie schematu ze zrodla usuwa ten caly rodzaj bledu.
+    """
+    try:
+        row = src.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+            (nazwa,)).fetchone()
+        return row[0] if row and row[0] else None
+    except sqlite3.DatabaseError:
+        return None
+
+
 def copy_table(src, dst, table, where=""):
     """Przepisuje tabele porcjami, pomijajac uszkodzone fragmenty."""
     try:
@@ -104,7 +123,13 @@ def copy_table(src, dst, table, where=""):
 
     coldef = ", ".join(f'"{c}"' for c in cols)
     placeholders = ", ".join("?" * len(cols))
-    dst.execute(f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(cols)})")
+
+    schemat = oryginalny_schemat(src, table)
+    if schemat:
+        dst.execute(schemat.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1))
+    else:
+        print(f"  {table:<16} UWAGA: nie odczytalem schematu — tabela bez kluczy")
+        dst.execute(f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(cols)})")
 
     copied = lost = offset = 0
     while True:
@@ -163,11 +188,20 @@ def rescue(source=DB):
             total_lost += lost
 
     print("\nOdtwarzam indeksy...")
-    for stmt in (
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_strat_id ON strategies(id)",
-        "CREATE INDEX IF NOT EXISTS idx_rating ON strategies(rating DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_status ON strategies(status)",
-    ):
+    try:
+        indeksy = [r[0] for r in src.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL")]
+    except sqlite3.DatabaseError:
+        indeksy = []
+    if not indeksy:
+        indeksy = [
+            "CREATE UNIQUE INDEX idx_strat_id ON strategies(id)",
+            "CREATE INDEX idx_rating ON strategies(rating DESC)",
+            "CREATE INDEX idx_status ON strategies(status)",
+        ]
+    for stmt in (s.replace("CREATE INDEX", "CREATE INDEX IF NOT EXISTS", 1)
+                  .replace("CREATE UNIQUE INDEX", "CREATE UNIQUE INDEX IF NOT EXISTS", 1)
+                 for s in indeksy):
         try:
             dst.execute(stmt)
         except sqlite3.DatabaseError as e:
