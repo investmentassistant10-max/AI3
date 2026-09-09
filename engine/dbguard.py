@@ -71,6 +71,15 @@ def snapshot(conn, keep=2):
         tmp.replace(target)          # podmiana atomowa: albo stara, albo nowa
         return target, time.time() - t0
     except (sqlite3.DatabaseError, OSError) as e:
+        # nieudana migawka nie moze zostawiac po sobie polowy pliku —
+        # przy bazie liczonej w setkach megabajtow taki smiec potrafi
+        # zabrac wiecej miejsca niz sama baza
+        for smiec in (tmp, Path(str(tmp) + "-journal"),
+                      Path(str(tmp) + "-wal"), Path(str(tmp) + "-shm")):
+            try:
+                smiec.unlink(missing_ok=True)
+            except OSError:
+                pass
         return None, str(e)
 
 
